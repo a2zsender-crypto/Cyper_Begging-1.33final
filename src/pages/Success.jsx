@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useLocation, Link, useNavigate, useSearchParams } from 'react-router-dom'; // Thêm useSearchParams
-import { CheckCircle, Home, Copy, Send, ExternalLink, Loader } from 'lucide-react';
+import { useLocation, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CheckCircle, Home, Send, ExternalLink, Package } from 'lucide-react';
 import { useLang } from '../context/LangContext';
 import { supabase } from '../supabaseClient';
 
@@ -8,44 +8,42 @@ export default function Success() {
   const { t } = useLang();
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams(); // Để lấy tham số từ URL
+  const [searchParams] = useSearchParams();
   const [telegramUsername, setTelegramUsername] = useState('');
-  const [orderDetails, setOrderDetails] = useState(null); // Lưu thông tin đơn hàng nếu fetch lại
+  const [orderDetails, setOrderDetails] = useState(null);
   
-  // 1. LẤY DỮ LIỆU TỪ NHIỀU NGUỒN (State hoặc URL)
-  // Ưu tiên lấy từ State (khi vừa checkout xong)
-  // Nếu mất State (F5 hoặc từ Oxapay về), lấy từ URL
-  const orderId = location.state?.orderId || searchParams.get('orderId') || searchParams.get('trackId');
-  const email = location.state?.email || searchParams.get('email');
-  const total = location.state?.total || searchParams.get('total');
-  const paymentLink = location.state?.paymentLink; // Link này thường chỉ có trong state
+  // Lấy orderId từ URL (Ưu tiên) hoặc State
+  const orderId = searchParams.get('orderId') || location.state?.orderId;
 
-  // 2. LOGIC BẢO VỆ: Chỉ đá về Home nếu KHÔNG TÌM THẤY orderId ở đâu cả
+  // 1. Fetch thông tin đơn hàng từ DB nếu có orderId
   useEffect(() => {
-    if (!orderId) {
-      // Nếu không có mã đơn hàng thì mới về trang chủ
-      // navigate('/'); 
-      // TẠM THỜI COMMENT DÒNG TRÊN ĐỂ BẠN TEST GIAO DIỆN KHÔNG BỊ DIS,
-      // KHI NÀO CHẠY THẬT THÌ BỎ COMMENT RA ĐỂ CHẶN NGƯỜI LẠ
-    }
-  }, [orderId, navigate]);
+    if (!orderId) return;
 
-  // 3. Lấy thông tin cấu hình Telegram & Fetch lại đơn hàng nếu thiếu thông tin (Optional)
+    const fetchOrder = async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(products(title, is_digital))')
+        .eq('id', orderId)
+        .single();
+      
+      if (!error && data) {
+        setOrderDetails(data);
+      }
+    };
+    fetchOrder();
+  }, [orderId]);
+
+  // 2. Lấy thông tin cấu hình Telegram
   useEffect(() => {
     const initData = async () => {
-      // Lấy Telegram
       const { data: settingData } = await supabase.from('site_settings').select('value').eq('key', 'contact_telegram').single();
       if (settingData?.value) {
         setTelegramUsername(settingData.value.replace('@', ''));
       }
-
-      // Nếu có ID mà thiếu thông tin (do F5 mất state), có thể fetch lại từ DB (Nâng cao)
-      // Ở đây ta dùng thông tin hiển thị cơ bản để tránh phức tạp
     };
     initData();
   }, []);
 
-  // Nếu không có orderId (và chưa bị redirect), hiển thị màn hình trống hoặc loading
   if (!orderId) {
       return (
           <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400 gap-4">
@@ -73,41 +71,34 @@ export default function Success() {
         </p>
 
         {/* THÔNG TIN ĐƠN HÀNG */}
-        <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-8 text-left space-y-3">
-          <div className="flex justify-between items-center pb-3 border-b border-slate-200">
-            <span className="text-slate-500 text-sm font-medium">{t('Mã đơn hàng', 'Order ID')}</span>
-            <span className="font-mono font-bold text-blue-600 text-lg">#{orderId}</span>
-          </div>
-          
-          {email && (
-            <div className="flex justify-between items-center">
-                <span className="text-slate-500 text-sm font-medium">Email</span>
-                <span className="font-medium text-slate-700">{email}</span>
-            </div>
-          )}
+        {orderDetails && (
+            <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-8 text-left space-y-3">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-200">
+                <span className="text-slate-500 text-sm font-medium">{t('Mã đơn hàng', 'Order ID')}</span>
+                <span className="font-mono font-bold text-blue-600 text-lg">#{orderDetails.id}</span>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-sm font-medium">Email</span>
+                  <span className="font-medium text-slate-700">{orderDetails.customer_email}</span>
+              </div>
 
-          {total && (
-            <div className="flex justify-between items-center pt-3 border-t border-slate-200">
-                <span className="text-slate-500 text-sm font-bold uppercase">{t('Tổng thanh toán', 'Total Amount')}</span>
-                <span className="font-bold text-green-600 text-xl">{total} USDT</span>
+              <div className="flex justify-between items-center">
+                  <span className="text-slate-500 text-sm font-medium">Status</span>
+                  <span className={`font-bold uppercase text-xs px-2 py-1 rounded ${orderDetails.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                      {orderDetails.status}
+                  </span>
+              </div>
+
+              <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+                  <span className="text-slate-500 text-sm font-bold uppercase">{t('Tổng thanh toán', 'Total Amount')}</span>
+                  <span className="font-bold text-green-600 text-xl">{orderDetails.amount} USDT</span>
+              </div>
             </div>
-          )}
-        </div>
+        )}
 
         {/* HƯỚNG DẪN TIẾP THEO */}
         <div className="space-y-4 mb-8">
-            {/* Nút mở lại link thanh toán (Chỉ hiện nếu có link và người dùng vừa đặt xong) */}
-            {paymentLink && (
-                <a 
-                  href={paymentLink} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="block w-full py-3 bg-yellow-50 text-yellow-700 font-bold rounded-xl border border-yellow-200 hover:bg-yellow-100 transition flex items-center justify-center gap-2"
-                >
-                   {t('Mở lại link thanh toán (Nếu chưa đóng)', 'Re-open Payment Link (If not paid)')} <ExternalLink size={18}/>
-                </a>
-            )}
-
             <div className="text-sm text-slate-600 bg-blue-50 p-4 rounded-xl border border-blue-100 text-left">
                 <p className="mb-2 flex gap-2">
                     ✅ <span>{t(
