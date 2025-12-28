@@ -4,18 +4,17 @@ import { useLang } from '../context/LangContext';
 import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Send, Bitcoin, Mail, Menu, X, ChevronRight, Bell } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-
-// --- THÊM MỚI: Thư viện Toast ---
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-// --------------------------------
+// Thêm useQuery để tối ưu hiệu năng
+import { useQuery } from '@tanstack/react-query';
 
 export default function Layout() {
   const { cart } = useCart();
   const { lang, setLang, t } = useLang();
-  const [settings, setSettings] = useState({});
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
+  // Realtime States
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotiDropdown, setShowNotiDropdown] = useState(false);
@@ -24,13 +23,20 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => {
-    supabase.from('site_settings').select('*').eq('is_public', true)
-      .then(({ data }) => {
-        const conf = {}; data?.forEach(i => conf[i.key] = i.value);
-        setSettings(conf);
-      });
+  // 1. LẤY SETTINGS TỪ DB (Dùng React Query để Cache)
+  const { data: settings = {} } = useQuery({
+    queryKey: ['site-settings'], // Key định danh để cache
+    queryFn: async () => {
+      const { data } = await supabase.from('site_settings').select('*').eq('is_public', true);
+      const conf = {}; 
+      data?.forEach(i => conf[i.key] = i.value);
+      return conf;
+    },
+    staleTime: 1000 * 60 * 10 // Cache 10 phút mới fetch lại
+  });
 
+  // 2. Quản lý Session
+  useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
         setSession(session);
     });
@@ -42,7 +48,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- LOGIC REALTIME CHUÔNG ---
+  // 3. Logic Realtime Chuông
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -51,7 +57,7 @@ export default function Layout() {
 
       const uid = session.user.id;
 
-      // 1. Lấy thông báo cũ
+      // Lấy thông báo cũ
       const fetchNoti = async () => {
           const { data } = await supabase.from('notifications')
               .select('*')
@@ -65,7 +71,7 @@ export default function Layout() {
       };
       fetchNoti();
 
-      // 2. Realtime
+      // Realtime
       const channel = supabase.channel('global-notifications')
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications' }, 
@@ -73,7 +79,6 @@ export default function Layout() {
                   if (payload.new.user_id === uid) {
                       setNotifications(prev => [payload.new, ...prev]);
                       setUnreadCount(prev => prev + 1);
-                      // Hiển thị popup nhỏ góc màn hình khi có thông báo mới
                       toast.info(`🔔 ${payload.new.title}: ${payload.new.message}`);
                   }
               }
@@ -105,7 +110,6 @@ export default function Layout() {
   return (
     <div className="flex flex-col min-h-screen font-sans bg-slate-50 text-slate-800">
       
-      {/* --- CẤU HÌNH TOAST CONTAINER (Để hiển thị thông báo toàn ứng dụng) --- */}
       <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} newestOnTop={true} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="light" />
 
       {/* HEADER */}
@@ -210,14 +214,26 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
+      {/* FOOTER - ĐÃ SỬA: Lấy dữ liệu từ Settings thay vì Hardcode */}
       <footer className="bg-white border-t border-gray-200 pt-16 pb-8 mt-20">
         <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
-            <div><div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4"><div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>CryptoShop</div><p className="text-sm text-slate-500 mb-6">{t('Uy tín, An toàn, Nhanh chóng.', 'Trusted, Secure, Fast.')}</p></div>
+            <div>
+                <div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4">
+                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>
+                    {settings.site_name || 'CryptoShop'}
+                </div>
+                {/* ĐOẠN NÀY ĐÃ SỬA: Hiển thị Footer Text từ DB */}
+                <p className="text-sm text-slate-500 mb-6">
+                    {lang === 'vi' 
+                        ? (settings.footer_text || 'Uy tín, An toàn, Nhanh chóng.') 
+                        : (settings.footer_text_en || 'Trusted, Secure, Fast.')}
+                </p>
+            </div>
             <div><h4 className="font-bold text-slate-800 mb-6">{t('Liên hệ', 'Contact')}</h4><ul className="space-y-4 text-sm text-slate-500"><li>{settings.contact_address}</li><li>Hotline: {settings.contact_phone}</li><li>Email: {settings.contact_email}</li></ul></div>
             <div><h4 className="font-bold text-slate-800 mb-6">{t('Hỗ trợ', 'Support')}</h4><ul className="space-y-3 text-sm text-slate-500"><li><Link to="/support">Policy</Link></li><li><Link to="/support">FAQ</Link></li></ul></div>
             <div><h4 className="font-bold text-slate-800 mb-6">{t('Thanh toán', 'Payment')}</h4><p className="text-sm text-slate-500">Via Oxapay (USDT, BTC, ETH)</p></div>
         </div>
-        <div className="border-t border-gray-100 pt-8 text-center text-sm text-slate-400">© 2025 CryptoShop.</div>
+        <div className="border-t border-gray-100 pt-8 text-center text-sm text-slate-400">© 2025 {settings.site_name || 'CryptoShop'}.</div>
       </footer>
     </div>
   );
