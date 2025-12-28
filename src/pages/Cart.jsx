@@ -102,18 +102,32 @@ export default function Cart() {
                     <div className="flex-1">
                         <h3 className="font-bold text-slate-800 line-clamp-1">{useLang().lang === 'vi' ? item.title : (item.title_en || item.title)}</h3>
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
+                        
+                        {/* --- ĐÃ SỬA LỖI TẠI ĐÂY --- */}
                         <div className="flex items-center gap-3 mt-2">
-                            <button onClick={()=>updateQuantity(item.id, item.quantity-1)} className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200">-</button>
-                            <span className="text-sm font-bold">{item.quantity}</span>
-                            <button onClick={()=>updateQuantity(item.id, item.quantity+1)} className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200">+</button>
+                            {/* Truyền -1 thay vì item.quantity-1 */}
+                            <button 
+                                onClick={()=>updateQuantity(item.id, -1)} 
+                                className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
+                            >-</button>
+                            
+                            <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
+                            
+                            {/* Truyền 1 thay vì item.quantity+1 */}
+                            <button 
+                                onClick={()=>updateQuantity(item.id, 1)} 
+                                className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
+                            >+</button>
                         </div>
+                        {/* --------------------------- */}
+
                     </div>
                     <button onClick={()=>removeFromCart(item.id)} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={20}/></button>
                 </div>
             ))}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN */}
+        {/* CỘT PHẢI: FORM THANH TOÁN (Giữ nguyên) */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
