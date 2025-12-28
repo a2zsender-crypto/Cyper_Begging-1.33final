@@ -5,43 +5,42 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-// Cấu hình Resend
 const sendEmail = async (to: string, subject: string, html: string) => {
-  const res = await fetch('https://api.resend.com/emails', {
+  if (!RESEND_API_KEY) return;
+  await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: 'CryptoShop <onboarding@resend.dev>', // Sau này thay bằng domain thật
+      from: 'AutoShop <onboarding@resend.dev>', // Sau này thay bằng domain verify của bạn
       to: [to],
       subject: subject,
       html: html,
     }),
   })
-  return res.json()
 }
 
 serve(async (req) => {
   try {
-    // 1. Nhận dữ liệu từ Oxapay
+    // 1. QUAN TRỌNG: Đọc dữ liệu dạng JSON (Sửa lỗi "Body can not be decoded...")
     const body = await req.json()
-    const { trackId, status, orderId, price, payAmount, currency } = body
+    console.log("Webhook received:", body) // Xem log trên Supabase Dashboard
 
-    // LOG để kiểm tra (Xem trong Supabase Dashboard -> Edge Functions -> Logs)
-    console.log("Oxapay Webhook received:", body)
+    // Lấy các trường quan trọng từ Oxapay
+    const { status, orderId, trackId } = body
 
-    // 2. Chỉ xử lý nếu trạng thái là "Paid" hoặc "Confirming"
-    // (Lưu ý: Oxapay có nhiều trạng thái, tùy cấu hình bạn chọn cái nào chốt đơn)
-    if (status !== 'Paid' && status !== 'Confirming' && status !== 'Completed') {
-        return new Response(JSON.stringify({ message: "Not a success status, ignoring." }), { status: 200 })
+    // 2. Chỉ xử lý khi trạng thái là Paid/Completed
+    // Oxapay có thể gửi: "Paid", "Confirming", "Expired"...
+    if (status !== 'Paid' && status !== 'Completed') {
+        return new Response(JSON.stringify({ message: "Not paid yet" }), { status: 200 })
     }
 
-    // 3. Kết nối Database quyền Admin (Service Role)
+    // 3. Kết nối Database với quyền Admin (Service Role)
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
 
-    // 4. Lấy thông tin đơn hàng hiện tại
+    // 4. Tìm đơn hàng
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .select('*, order_items(*, products(*))')
@@ -49,23 +48,29 @@ serve(async (req) => {
       .single()
 
     if (orderError || !order) {
-        throw new Error("Order not found")
+        console.error("Order not found:", orderId)
+        return new Response(JSON.stringify({ error: "Order not found" }), { status: 404 })
     }
 
-    // Nếu đơn đã xử lý rồi thì bỏ qua để tránh gửi mail 2 lần
+    // Nếu đơn đã xử lý rồi thì thôi
     if (order.status === 'paid') {
-        return new Response(JSON.stringify({ message: "Order already paid" }), { status: 200 })
+        return new Response(JSON.stringify({ message: "Already processed" }), { status: 200 })
     }
 
-    // 5. Cập nhật trạng thái đơn hàng thành PAID
-    await supabase.from('orders').update({ status: 'paid', oxapay_track_id: trackId }).eq('id', orderId)
+    // 5. Cập nhật trạng thái đơn hàng -> PAID
+    await supabase.from('orders').update({ 
+        status: 'paid', 
+        oxapay_track_id: trackId 
+    }).eq('id', orderId)
 
-    // 6. Xử lý lấy Key (Nếu là sản phẩm số)
-    let emailContent = `<h1>Cảm ơn bạn đã mua hàng!</h1><p>Mã đơn: #${orderId}</p><h3>Sản phẩm của bạn:</h3><ul>`
+    // 6. Xử lý gửi Key (Logic gửi hàng)
+    let emailContent = `<h1>Thanh toán thành công! / Payment Successful!</h1>
+                        <p>Order ID: #${orderId}</p>
+                        <h3>Sản phẩm của bạn / Your Products:</h3><ul>`
     
     for (const item of order.order_items) {
         if (item.products.is_digital) {
-            // Lấy key chưa dùng từ kho
+            // Lấy key chưa dùng
             const { data: keys } = await supabase
                 .from('product_keys')
                 .select('*')
@@ -83,24 +88,26 @@ serve(async (req) => {
                     used_by_order_id: orderId 
                 }).in('id', keyIds)
 
-                emailContent += `<li><strong>${item.products.title}:</strong><br/><code style="background:#eee;padding:5px;display:block;margin:5px 0;">${keyValues}</code></li>`
+                emailContent += `<li><strong>${item.products.title}:</strong><br/>
+                                 <code style="background:#f4f4f4;padding:10px;display:block;margin:5px 0;border-radius:5px;">${keyValues}</code></li>`
             } else {
-                emailContent += `<li><strong>${item.products.title}:</strong> (Hết kho - Admin sẽ liên hệ lại)</li>`
+                emailContent += `<li><strong>${item.products.title}:</strong> (Hết kho - Admin sẽ liên hệ / Out of Stock - Contact Admin)</li>`
             }
         } else {
-            emailContent += `<li><strong>${item.products.title}:</strong> (Sản phẩm vật lý - Đang chuẩn bị giao)</li>`
+            emailContent += `<li><strong>${item.products.title}:</strong> (Sản phẩm vật lý - Đang giao / Physical Item - Shipping soon)</li>`
         }
     }
-    emailContent += "</ul><p>Nếu cần hỗ trợ, vui lòng liên hệ Telegram.</p>"
+    emailContent += "</ul><p>Thank you for buying at AutoShop!</p>"
 
-    // 7. Gửi Email cho khách
+    // 7. Gửi mail
     if (order.customer_email) {
-        await sendEmail(order.customer_email, `[CryptoShop] Đơn hàng #${orderId} Thành công`, emailContent)
+        await sendEmail(order.customer_email, `[AutoShop] Order #${orderId} Completed`, emailContent)
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } })
 
   } catch (error) {
+    console.error("Webhook Error:", error)
     return new Response(JSON.stringify({ error: error.message }), { status: 500 })
   }
 })
