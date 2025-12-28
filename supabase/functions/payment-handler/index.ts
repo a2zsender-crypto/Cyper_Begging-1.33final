@@ -7,37 +7,32 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  // Xử lý CORS cho trình duyệt
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     );
     const url = new URL(req.url);
 
-    // --- 1. WEBHOOK (XỬ LÝ KHI THANH TOÁN XONG) ---
-    // (Phần này giữ nguyên code của mày, không sửa gì)
-    if (url.pathname.endsWith('/webhook')) {
-        const formData = await req.formData(); // Lưu ý: Nếu Oxapay gửi JSON thì đoạn này sẽ lỗi, nhưng nếu mày test webhook chạy ok rồi thì giữ nguyên.
-        // ... (Code webhook cũ của mày giữ nguyên ở đây) ...
-        // Để ngắn gọn tao không paste lại phần Webhook vì lỗi không nằm ở đây.
-        // Mày giữ nguyên phần Webhook cũ nhé.
-        return new Response("OK", { status: 200, headers: corsHeaders });
-    }
-
-    // --- 2. TẠO CHECKOUT (XỬ LÝ LỖI NGÔN NGỮ TẠI ĐÂY) ---
+    // --- 1. PHẦN WEBHOOK (GIỮ NGUYÊN HOẶC BỎ QUA NẾU BẠN TÁCH RIÊNG) ---
+    // Vì bạn đã tách webhook ra file riêng rồi, nên file này chỉ cần lo phần tạo Link thôi.
+    
+    // --- 2. PHẦN TẠO LINK THANH TOÁN (Logic chính) ---
     let body;
     try { body = await req.json(); } catch { throw new Error("Body rỗng"); }
     
-    // THÊM: Nhận biến language từ Client
+    // NHẬN BIẾN LANGUAGE TỪ CLIENT
     const { items, email, name, contactMethod, contactInfo, shippingAddress, phoneNumber, language } = body;
 
     if (!items || items.length === 0 || !email) throw new Error("Giỏ hàng trống");
     
+    // Lấy Merchant Key từ Database (bảng app_config)
     const { data: config } = await supabase.from('app_config').select('*').eq('key', 'OXAPAY_MERCHANT_KEY').single();
     const merchantKey = config?.value;
-    if (!merchantKey || merchantKey.includes('thay_')) throw new Error("Lỗi cấu hình Merchant Key");
+    if (!merchantKey) throw new Error("Chưa cấu hình Merchant Key");
 
     let totalAmount = 0;
     const orderItemsData = [];
@@ -50,15 +45,16 @@ serve(async (req) => {
         const lineTotal = product.price * item.quantity;
         totalAmount += lineTotal;
 
-        // --- SỬA: LOGIC CHỌN TÊN SẢN PHẨM THEO NGÔN NGỮ ---
+        // --- SỬA TÊN SẢN PHẨM THEO NGÔN NGỮ ---
+        // Nếu user chọn tiếng Anh ('en') và có tên tiếng Anh -> Lấy tên tiếng Anh
+        // Ngược lại lấy tên mặc định (Tiếng Việt)
         const productName = (language === 'en' && product.title_en) ? product.title_en : product.title;
+        
         description += `${productName} (x${item.quantity}), `;
-        // ---------------------------------------------------
-
         orderItemsData.push({ product_id: product.id, quantity: item.quantity, price_at_purchase: product.price });
     }
 
-    // LƯU ĐỊA CHỈ VÀ SĐT VÀO DB
+    // TẠO ĐƠN HÀNG STATUS = PENDING
     const { data: order, error: orderError } = await supabase.from('orders').insert({
         amount: totalAmount, 
         customer_email: email, 
@@ -72,20 +68,35 @@ serve(async (req) => {
 
     if (orderError) throw orderError;
 
+    // LƯU CHI TIẾT ĐƠN HÀNG
     const itemsToInsert = orderItemsData.map(i => ({ ...i, order_id: order.id }));
     await supabase.from('order_items').insert(itemsToInsert);
 
+    // GỌI QUA OXAPAY
     const oxapayPayload = {
-      merchant: merchantKey, amount: totalAmount, currency: 'USDT', lifeTime: 60, feePaidByPayer: 0,
+      merchant: merchantKey, 
+      amount: totalAmount, 
+      currency: 'USDT', 
+      lifeTime: 60, 
+      feePaidByPayer: 0,
       returnUrl: `${req.headers.get('origin')}/success?orderId=${order.id}`, 
-      // Chỗ này giữ nguyên logic callback cũ của mày
-      callbackUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/payment-handler/webhook`,
-      orderId: order.id.toString(), description: description.substring(0, 100)
+      // Link webhook để Oxapay báo về khi xong (Trỏ vào function oxapay-webhook)
+      callbackUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/oxapay-webhook`,
+      orderId: order.id.toString(), 
+      description: description.substring(0, 100),
+      email: email
     };
 
-    const oxapayRes = await fetch('https://api.oxapay.com/merchants/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(oxapayPayload) });
+    const oxapayRes = await fetch('https://api.oxapay.com/merchants/request', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(oxapayPayload) 
+    });
+    
     const oxapayData = await oxapayRes.json();
     if (oxapayData.result !== 100) throw new Error(oxapayData.message || "Lỗi Oxapay");
+    
+    // Cập nhật TrackID
     await supabase.from('orders').update({ oxapay_track_id: oxapayData.trackId }).eq('id', order.id);
 
     return new Response(JSON.stringify({ payUrl: oxapayData.payLink }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
