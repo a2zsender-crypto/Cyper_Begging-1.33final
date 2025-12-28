@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useLang } from '../context/LangContext';
-import { Send, RefreshCw, MapPin, Phone, Mail, Calculator } from 'lucide-react';
+import { Send, RefreshCw, MapPin, Phone, Mail, Calculator, Lock } from 'lucide-react';
 
 export default function Contact() {
   const { t, lang } = useLang(); 
@@ -9,14 +9,32 @@ export default function Contact() {
   const [settings, setSettings] = useState({}); 
   const [mathProblem, setMathProblem] = useState({ a: 0, b: 0, result: 0 });
   const [loading, setLoading] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
+      // 1. Lấy thông tin cấu hình
       supabase.from('site_settings').select('*').eq('is_public', true)
         .then(({ data }) => {
             const conf = {}; data?.forEach(i => conf[i.key] = i.value);
             setSettings(conf);
         });
+      
+      // 2. Tạo Math Captcha
       generateMathCaptcha();
+
+      // 3. KIỂM TRA ĐĂNG NHẬP & AUTO-FILL
+      const checkUser = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              setIsLoggedIn(true);
+              setFormData(prev => ({
+                  ...prev,
+                  email: user.email, // Tự điền email
+                  name: user.user_metadata?.full_name || prev.name // Tự điền tên nếu có
+              }));
+          }
+      };
+      checkUser();
   }, []);
 
   const generateMathCaptcha = () => {
@@ -47,7 +65,12 @@ export default function Contact() {
         if (data?.error) throw new Error(data.error);
 
         alert(t("Gửi thành công! Chúng tôi sẽ liên hệ sớm.", "Sent successfully! We will contact you soon."));
-        setFormData({ name: '', email: '', phone: '', message: '', captchaInput: '' });
+        // Nếu đã đăng nhập thì giữ lại tên/email, chỉ xóa nội dung
+        if (isLoggedIn) {
+            setFormData(prev => ({ ...prev, message: '', phone: '', captchaInput: '' }));
+        } else {
+            setFormData({ name: '', email: '', phone: '', message: '', captchaInput: '' });
+        }
         generateMathCaptcha();
     } catch (err) {
         alert(t("Lỗi gửi tin: ", "Error sending: ") + err.message);
@@ -58,8 +81,7 @@ export default function Contact() {
 
   return (
     <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-lg overflow-hidden md:flex my-10 border border-gray-100">
-        {/* === CỘT TRÁI (MÀU XANH CHUẨN) === */}
-        {/* Đổi từ bg-blue-800 sang bg-blue-600 */}
+        {/* === CỘT TRÁI === */}
         <div className="bg-blue-600 text-white p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
             <div className="absolute -top-10 -right-10 w-32 h-32 bg-blue-500 rounded-full opacity-50 blur-2xl pointer-events-none"></div>
             
@@ -110,7 +132,7 @@ export default function Contact() {
             </div>
         </div>
 
-        {/* === CỘT PHẢI (BO TRÒN INPUT) === */}
+        {/* === CỘT PHẢI === */}
         <div className="p-8 md:w-2/3">
             <h2 className="text-2xl font-bold text-slate-800 mb-2">{t('Gửi yêu cầu hỗ trợ', 'Send Request')}</h2>
             <p className="text-slate-500 text-sm mb-6">{t('Vui lòng điền thông tin bên dưới, chúng tôi sẽ phản hồi sớm nhất.', 'Please fill out the form below, we will reply shortly.')}</p>
@@ -119,7 +141,6 @@ export default function Contact() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div>
                         <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Họ và tên', 'Full Name')}</label>
-                        {/* Đã thêm rounded-xl */}
                         <input required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
                             placeholder={t("Nhập tên của bạn...", "Enter your name...")} 
                             value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})}/>
@@ -134,9 +155,17 @@ export default function Contact() {
                 
                 <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Email</label>
-                    <input type="email" required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
-                        placeholder="example@gmail.com" 
-                        value={formData.email} onChange={e=>setFormData({...formData, email: e.target.value})}/>
+                    <div className="relative">
+                        <input type="email" required 
+                            className={`w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${isLoggedIn ? 'bg-gray-100 text-slate-500 cursor-not-allowed' : 'bg-slate-50 focus:bg-white'}`}
+                            placeholder="example@gmail.com" 
+                            value={formData.email} 
+                            onChange={e=>!isLoggedIn && setFormData({...formData, email: e.target.value})}
+                            readOnly={isLoggedIn} // KHÓA INPUT NẾU ĐÃ ĐĂNG NHẬP
+                        />
+                        {isLoggedIn && <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />}
+                    </div>
+                    {isLoggedIn && <p className="text-[10px] text-blue-600 mt-1 italic">Email được lấy từ tài khoản đăng nhập để đảm bảo an toàn.</p>}
                 </div>
 
                 <div>
@@ -159,7 +188,6 @@ export default function Contact() {
                         value={formData.captchaInput} onChange={e=>setFormData({...formData, captchaInput: e.target.value})}/>
                 </div>
 
-                {/* Button cũng bo tròn xl */}
                 <button disabled={loading} className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200 flex justify-center items-center gap-2 transform active:scale-[0.99]">
                     {loading ? t('Đang gửi...', 'Sending...') : <><Send size={18}/> {t('Gửi Yêu Cầu', 'Send Message')}</>}
                 </button>
