@@ -18,13 +18,33 @@ export default function AdminContacts({ session, role, activeTicketId }) {
     fetchContacts();
   }, [role, session]);
 
-  // Logic tự động mở ticket nếu có ID truyền vào
+  // LOGIC 1: MỞ TICKET NẾU CÓ PROP (CHỈ CHẠY KHI COMPONENT MOUNT HOẶC ID THAY ĐỔI)
   useEffect(() => {
       if (activeTicketId && contacts.length > 0) {
           const ticket = contacts.find(c => c.id.toString() === activeTicketId);
           if (ticket) openTicketChat(ticket);
       }
   }, [activeTicketId, contacts]);
+
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN "FORCE_OPEN_TICKET" TỪ LAYOUT (ĐỂ FIX LỖI CLICK KO NHẢY)
+  useEffect(() => {
+      const handleForceOpen = (e) => {
+          const ticketId = e.detail;
+          const ticket = contacts.find(c => c.id.toString() === ticketId);
+          if (ticket) {
+              openTicketChat(ticket);
+          } else {
+              // Nếu chưa có trong list (ví dụ danh sách cũ), fetch lại rồi mở
+              fetchContacts().then((data) => {
+                  const newTicket = data?.find(c => c.id.toString() === ticketId);
+                  if (newTicket) openTicketChat(newTicket);
+              });
+          }
+      };
+
+      window.addEventListener('FORCE_OPEN_TICKET', handleForceOpen);
+      return () => window.removeEventListener('FORCE_OPEN_TICKET', handleForceOpen);
+  }, [contacts]);
 
   // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
@@ -67,6 +87,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       }
       const { data } = await qContacts;
       setContacts(data || []);
+      return data;
   };
 
   const openTicketChat = async (ticket) => {
