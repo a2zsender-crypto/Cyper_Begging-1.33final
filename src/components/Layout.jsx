@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Send, Bitcoin, Mail, Menu, X, ChevronRight, Bell } from 'lucide-react';
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Mail, Menu, X, ChevronRight, Bell, Bitcoin } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -22,7 +22,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 1. LẤY SETTINGS TỪ DB
+  // 1. LẤY SETTINGS
   const { data: settings = {} } = useQuery({
     queryKey: ['site-settings'],
     queryFn: async () => {
@@ -34,7 +34,7 @@ export default function Layout() {
     staleTime: 1000 * 60 * 10
   });
 
-  // 2. Quản lý Session
+  // 2. QUẢN LÝ SESSION
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
         setSession(session);
@@ -47,7 +47,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 3. Logic Realtime Chuông
+  // 3. LOGIC REALTIME CHUÔNG (Sửa lại để chắc chắn nhận tin)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -56,6 +56,7 @@ export default function Layout() {
 
       const uid = session.user.id;
 
+      // Fetch 10 thông báo mới nhất
       const fetchNoti = async () => {
           const { data } = await supabase.from('notifications')
               .select('*')
@@ -69,15 +70,15 @@ export default function Layout() {
       };
       fetchNoti();
 
-      const channel = supabase.channel('global-notifications')
+      // Lắng nghe thông báo mới
+      const channel = supabase.channel('realtime-notifications')
           .on('postgres_changes', 
-              { event: 'INSERT', schema: 'public', table: 'notifications' }, 
+              { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, 
               (payload) => {
-                  if (payload.new.user_id === uid) {
-                      setNotifications(prev => [payload.new, ...prev]);
-                      setUnreadCount(prev => prev + 1);
-                      toast.info(`🔔 ${payload.new.title}: ${payload.new.message}`);
-                  }
+                  setNotifications(prev => [payload.new, ...prev]);
+                  setUnreadCount(prev => prev + 1);
+                  // Rung chuông hoặc Toast
+                  toast.info(`🔔 ${payload.new.title}`);
               }
           )
           .subscribe();
@@ -87,14 +88,29 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
+  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHÔNG NHẢY TRANG)
   const handleReadNoti = async (noti) => {
+      // 1. Đánh dấu đã đọc trong DB
       if (!noti.is_read) {
           await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
           setUnreadCount(prev => Math.max(0, prev - 1));
           setNotifications(prev => prev.map(n => n.id === noti.id ? { ...n, is_read: true } : n));
       }
+      
+      // 2. Đóng dropdown
       setShowNotiDropdown(false);
-      if (noti.link) navigate(noti.link);
+
+      // 3. Điều hướng (Quan trọng: Xử lý link có tham số)
+      if (noti.link) {
+          // Nếu đang ở trang đích rồi thì force reload component bằng cách set state hoặc dùng window.location (nhưng navigate mượt hơn)
+          navigate(noti.link);
+          
+          // Hack nhỏ: Nếu link là admin tab, cần trigger lại effect bên Admin.jsx
+          if (noti.link.includes('ticketId=')) {
+             // Dispatch event để AdminContacts biết mà mở modal (nếu đang ở trang đó)
+             window.dispatchEvent(new Event('check-ticket-url'));
+          }
+      }
   };
 
   const handleLogout = async () => { 
@@ -102,16 +118,6 @@ export default function Layout() {
       localStorage.clear(); 
       toast.success(t("Đăng xuất thành công!", "Logged out successfully!"));
       navigate('/login'); 
-  };
-
-  // Hàm cuộn trang khi click link footer (Hỗ trợ cuộn mượt)
-  const handleScrollTo = (id) => {
-      if (location.pathname !== '/support') {
-          navigate(`/support#${id}`);
-      } else {
-          const element = document.getElementById(id);
-          if (element) element.scrollIntoView({ behavior: 'smooth' });
-      }
   };
 
   return (
@@ -221,13 +227,10 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
-      {/* FOOTER */}
+      {/* FOOTER - Phần này giữ nguyên như cũ của bạn */}
       <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-20">
         <div className="container mx-auto px-4">
-            
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12">
-                
-                {/* CỘT 1 */}
                 <div className="md:col-span-4 flex flex-col items-start">
                     <div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4">
                         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>
@@ -239,8 +242,6 @@ export default function Layout() {
                             : (settings.footer_text_en || 'Trusted, Secure, Fast. Automated sales system 24/7.')}
                     </p>
                 </div>
-
-                {/* CỘT 2 */}
                 <div className="md:col-span-3">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Liên hệ', 'Contact')}</h4>
                     <ul className="space-y-3 text-sm text-slate-500">
@@ -249,8 +250,6 @@ export default function Layout() {
                         <li className="flex items-center gap-2"><Mail size={16} className="text-blue-500"/> {settings.contact_email || 'Email Support'}</li>
                     </ul>
                 </div>
-                
-                {/* CỘT 3 */}
                 <div className="md:col-span-2">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Hỗ trợ', 'Support')}</h4>
                     <ul className="space-y-3 text-sm text-slate-500">
@@ -259,25 +258,14 @@ export default function Layout() {
                         <li><Link to="/support#faq" className="hover:text-blue-600 transition">FAQ / Help Center</Link></li>
                     </ul>
                 </div>
-                
-                {/* CỘT 4 */}
                 <div className="md:col-span-3">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Thanh toán', 'Payment')}</h4>
                     <p className="text-xs text-slate-400 mb-3">Secured by Oxapay (USDT, BTC, ETH)</p>
-                    
                     <div className="flex flex-col gap-3">
                         <div className="flex items-center gap-3">
-                            {/* Logo Oxapay */}
                             <div className="border border-slate-200 rounded-xl px-3 py-1.5 bg-white shadow-sm hover:shadow-md transition cursor-pointer h-12 flex items-center justify-center">
-                                <img 
-                                    src="/oxapay.png" 
-                                    alt="Oxapay" 
-                                    className="h-6 w-auto object-contain"
-                                    onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerText = 'Oxapay'; }}
-                                />
+                                <img src="/oxapay.png" alt="Oxapay" className="h-6 w-auto object-contain" onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerText = 'Oxapay'; }}/>
                             </div>
-
-                            {/* Các Icon Coin (Thứ tự mới: USDT, BTC, ETH) */}
                             <div className="flex items-center gap-2">
                                 <img src="/usdt.png" alt="USDT" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Tether" onError={(e)=>e.target.style.display='none'}/>
                                 <img src="/btc.png" alt="BTC" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Bitcoin" onError={(e)=>e.target.style.display='none'}/>
@@ -286,14 +274,10 @@ export default function Layout() {
                         </div>
                     </div>
                 </div>
-
             </div>
-
-            {/* COPYRIGHT */}
             <div className="border-t border-gray-100 pt-8 flex flex-col md:flex-row justify-between items-center text-sm text-slate-400">
                 <p>© 2025 {settings.site_name || 'CryptoShop'}. All rights reserved.</p>
                 <div className="flex gap-4 mt-2 md:mt-0">
-                    {/* ĐÃ SỬA: Link này cũng phải trỏ về #returns cho đồng bộ */}
                     <Link to="/support#returns" className="hover:text-blue-500 cursor-pointer">Privacy</Link>
                     <Link to="/support#terms" className="hover:text-blue-500 cursor-pointer">Terms</Link>
                 </div>
