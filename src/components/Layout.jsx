@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-// Thêm useQuery để tối ưu hiệu năng
 import { useQuery } from '@tanstack/react-query';
 
 export default function Layout() {
@@ -23,16 +22,16 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 1. LẤY SETTINGS TỪ DB (Dùng React Query để Cache)
+  // 1. LẤY SETTINGS TỪ DB
   const { data: settings = {} } = useQuery({
-    queryKey: ['site-settings'], // Key định danh để cache
+    queryKey: ['site-settings'],
     queryFn: async () => {
       const { data } = await supabase.from('site_settings').select('*').eq('is_public', true);
       const conf = {}; 
       data?.forEach(i => conf[i.key] = i.value);
       return conf;
     },
-    staleTime: 1000 * 60 * 10 // Cache 10 phút mới fetch lại
+    staleTime: 1000 * 60 * 10
   });
 
   // 2. Quản lý Session
@@ -57,7 +56,6 @@ export default function Layout() {
 
       const uid = session.user.id;
 
-      // Lấy thông báo cũ
       const fetchNoti = async () => {
           const { data } = await supabase.from('notifications')
               .select('*')
@@ -71,7 +69,6 @@ export default function Layout() {
       };
       fetchNoti();
 
-      // Realtime
       const channel = supabase.channel('global-notifications')
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications' }, 
@@ -105,6 +102,16 @@ export default function Layout() {
       localStorage.clear(); 
       toast.success(t("Đăng xuất thành công!", "Logged out successfully!"));
       navigate('/login'); 
+  };
+
+  // Hàm cuộn trang khi click link footer (Hỗ trợ cuộn mượt)
+  const handleScrollTo = (id) => {
+      if (location.pathname !== '/support') {
+          navigate(`/support#${id}`);
+      } else {
+          const element = document.getElementById(id);
+          if (element) element.scrollIntoView({ behavior: 'smooth' });
+      }
   };
 
   return (
@@ -214,26 +221,84 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
-      {/* FOOTER - ĐÃ SỬA: Lấy dữ liệu từ Settings thay vì Hardcode */}
-      <footer className="bg-white border-t border-gray-200 pt-16 pb-8 mt-20">
-        <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
-            <div>
-                <div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4">
-                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>
-                    {settings.site_name || 'CryptoShop'}
+      {/* FOOTER */}
+      <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-20">
+        <div className="container mx-auto px-4">
+            
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12">
+                
+                {/* CỘT 1 */}
+                <div className="md:col-span-4 flex flex-col items-start">
+                    <div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4">
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>
+                        {settings.site_name || 'CryptoShop'}
+                    </div>
+                    <p className="text-sm text-slate-500 leading-relaxed pr-4">
+                        {lang === 'vi' 
+                            ? (settings.footer_text || 'Uy tín, An toàn, Nhanh chóng. Hệ thống bán hàng tự động 24/7.') 
+                            : (settings.footer_text_en || 'Trusted, Secure, Fast. Automated sales system 24/7.')}
+                    </p>
                 </div>
-                {/* ĐOẠN NÀY ĐÃ SỬA: Hiển thị Footer Text từ DB */}
-                <p className="text-sm text-slate-500 mb-6">
-                    {lang === 'vi' 
-                        ? (settings.footer_text || 'Uy tín, An toàn, Nhanh chóng.') 
-                        : (settings.footer_text_en || 'Trusted, Secure, Fast.')}
-                </p>
+
+                {/* CỘT 2 */}
+                <div className="md:col-span-3">
+                    <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Liên hệ', 'Contact')}</h4>
+                    <ul className="space-y-3 text-sm text-slate-500">
+                        <li className="flex items-start gap-2"><MapPin size={16} className="mt-0.5 text-blue-500"/> {settings.contact_address || 'Vietnam'}</li>
+                        <li className="flex items-center gap-2"><Phone size={16} className="text-blue-500"/> {settings.contact_phone || 'Hotline'}</li>
+                        <li className="flex items-center gap-2"><Mail size={16} className="text-blue-500"/> {settings.contact_email || 'Email Support'}</li>
+                    </ul>
+                </div>
+                
+                {/* CỘT 3 */}
+                <div className="md:col-span-2">
+                    <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Hỗ trợ', 'Support')}</h4>
+                    <ul className="space-y-3 text-sm text-slate-500">
+                        <li><Link to="/support#returns" className="hover:text-blue-600 transition">Policy & Privacy</Link></li>
+                        <li><Link to="/support#terms" className="hover:text-blue-600 transition">Terms of Service</Link></li>
+                        <li><Link to="/support#faq" className="hover:text-blue-600 transition">FAQ / Help Center</Link></li>
+                    </ul>
+                </div>
+                
+                {/* CỘT 4 */}
+                <div className="md:col-span-3">
+                    <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Thanh toán', 'Payment')}</h4>
+                    <p className="text-xs text-slate-400 mb-3">Secured by Oxapay (USDT, BTC, ETH)</p>
+                    
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                            {/* Logo Oxapay */}
+                            <div className="border border-slate-200 rounded-xl px-3 py-1.5 bg-white shadow-sm hover:shadow-md transition cursor-pointer h-12 flex items-center justify-center">
+                                <img 
+                                    src="/oxapay.png" 
+                                    alt="Oxapay" 
+                                    className="h-6 w-auto object-contain"
+                                    onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerText = 'Oxapay'; }}
+                                />
+                            </div>
+
+                            {/* Các Icon Coin (Thứ tự mới: USDT, BTC, ETH) */}
+                            <div className="flex items-center gap-2">
+                                <img src="/usdt.png" alt="USDT" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Tether" onError={(e)=>e.target.style.display='none'}/>
+                                <img src="/btc.png" alt="BTC" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Bitcoin" onError={(e)=>e.target.style.display='none'}/>
+                                <img src="/eth.png" alt="ETH" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Ethereum" onError={(e)=>e.target.style.display='none'}/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
-            <div><h4 className="font-bold text-slate-800 mb-6">{t('Liên hệ', 'Contact')}</h4><ul className="space-y-4 text-sm text-slate-500"><li>{settings.contact_address}</li><li>Hotline: {settings.contact_phone}</li><li>Email: {settings.contact_email}</li></ul></div>
-            <div><h4 className="font-bold text-slate-800 mb-6">{t('Hỗ trợ', 'Support')}</h4><ul className="space-y-3 text-sm text-slate-500"><li><Link to="/support">Policy</Link></li><li><Link to="/support">FAQ</Link></li></ul></div>
-            <div><h4 className="font-bold text-slate-800 mb-6">{t('Thanh toán', 'Payment')}</h4><p className="text-sm text-slate-500">Via Oxapay (USDT, BTC, ETH)</p></div>
+
+            {/* COPYRIGHT */}
+            <div className="border-t border-gray-100 pt-8 flex flex-col md:flex-row justify-between items-center text-sm text-slate-400">
+                <p>© 2025 {settings.site_name || 'CryptoShop'}. All rights reserved.</p>
+                <div className="flex gap-4 mt-2 md:mt-0">
+                    {/* ĐÃ SỬA: Link này cũng phải trỏ về #returns cho đồng bộ */}
+                    <Link to="/support#returns" className="hover:text-blue-500 cursor-pointer">Privacy</Link>
+                    <Link to="/support#terms" className="hover:text-blue-500 cursor-pointer">Terms</Link>
+                </div>
+            </div>
         </div>
-        <div className="border-t border-gray-100 pt-8 text-center text-sm text-slate-400">© 2025 {settings.site_name || 'CryptoShop'}.</div>
       </footer>
     </div>
   );
