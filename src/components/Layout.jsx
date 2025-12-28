@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Mail, Menu, X, ChevronRight, Bell, Bitcoin } from 'lucide-react';
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -22,7 +22,6 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 1. LẤY SETTINGS
   const { data: settings = {} } = useQuery({
     queryKey: ['site-settings'],
     queryFn: async () => {
@@ -34,35 +33,27 @@ export default function Layout() {
     staleTime: 1000 * 60 * 10
   });
 
-  // 2. QUẢN LÝ SESSION
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-        setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSession(session);
-    });
-
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { setSession(session); });
     return () => subscription.unsubscribe();
   }, []);
 
-  // 3. LOGIC REALTIME CHUÔNG (CHẮC CHẮN NHẬN CHO CẢ USER)
+  // LOGIC CHUÔNG (User & Admin)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
           return;
       }
-
       const uid = session.user.id;
 
-      // Fetch 10 thông báo cũ
+      // Lấy thông báo cũ
       const fetchNoti = async () => {
           const { data } = await supabase.from('notifications')
               .select('*')
               .eq('user_id', uid)
               .order('created_at', {ascending: false})
-              .limit(10);
+              .limit(15);
           if (data) {
               setNotifications(data);
               setUnreadCount(data.filter(n => !n.is_read).length);
@@ -70,17 +61,14 @@ export default function Layout() {
       };
       fetchNoti();
 
-      // Đăng ký kênh riêng cho User
-      const channel = supabase.channel(`noti-${uid}`)
+      // Lắng nghe thông báo mới
+      const channel = supabase.channel(`global-noti-${uid}`)
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, 
               (payload) => {
-                  // Chỉ nhận nếu đúng user_id (Dù filter đã lọc, check lại cho chắc)
-                  if(payload.new.user_id === uid) {
-                      setNotifications(prev => [payload.new, ...prev]);
-                      setUnreadCount(prev => prev + 1);
-                      toast.info(`🔔 ${payload.new.title}`);
-                  }
+                  setNotifications(prev => [payload.new, ...prev]);
+                  setUnreadCount(prev => prev + 1);
+                  toast.info(`🔔 ${payload.new.title}`);
               }
           )
           .subscribe();
@@ -90,9 +78,8 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
-  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHI ĐANG Ở TRANG RỒI CLICK LẠI)
+  // --- XỬ LÝ CLICK THÔNG BÁO (ĐÃ FIX DELAY) ---
   const handleReadNoti = async (noti) => {
-      // 1. Đánh dấu đã đọc
       if (!noti.is_read) {
           await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
           setUnreadCount(prev => Math.max(0, prev - 1));
@@ -101,16 +88,16 @@ export default function Layout() {
       
       setShowNotiDropdown(false);
 
-      // 2. Điều hướng
       if (noti.link) {
-          navigate(noti.link);
+          navigate(noti.link); // Chuyển trang trước
           
-          // --- MỚI: BẮN SỰ KIỆN NẾU LÀ LINK TICKET ---
-          // Giúp AdminContacts biết để mở lại modal ngay cả khi URL không đổi
+          // NẾU LÀ TICKET: Chờ 500ms để trang AdminContacts kịp load (Mount) rồi mới bắn lệnh mở
           if (noti.link.includes('ticketId=')) {
              try {
                  const ticketId = noti.link.split('ticketId=')[1];
-                 window.dispatchEvent(new CustomEvent('FORCE_OPEN_TICKET', { detail: ticketId }));
+                 setTimeout(() => {
+                     window.dispatchEvent(new CustomEvent('FORCE_OPEN_TICKET', { detail: ticketId }));
+                 }, 500); 
              } catch(e) { console.error(e); }
           }
       }
@@ -119,14 +106,12 @@ export default function Layout() {
   const handleLogout = async () => { 
       await supabase.auth.signOut(); 
       localStorage.clear(); 
-      toast.success(t("Đăng xuất thành công!", "Logged out successfully!"));
       navigate('/login'); 
   };
 
   return (
     <div className="flex flex-col min-h-screen font-sans bg-slate-50 text-slate-800">
-      
-      <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} newestOnTop={true} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="light" />
+      <ToastContainer position="top-right" autoClose={3000} theme="light" />
 
       {/* HEADER */}
       <nav className="bg-white shadow-sm sticky top-0 z-50 border-b border-gray-100">
@@ -161,7 +146,7 @@ export default function Layout() {
               <Globe size={16} /> {lang.toUpperCase()}
             </button>
 
-            {/* CHUÔNG THÔNG BÁO */}
+            {/* BELL NOTIFICATION */}
             {session && (
                 <div className="relative">
                     <button onClick={() => setShowNotiDropdown(!showNotiDropdown)} className="relative hover:text-blue-600 transition p-1">
@@ -230,7 +215,7 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
-      {/* FOOTER (Giữ nguyên) */}
+      {/* FOOTER */}
       <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-20">
         <div className="container mx-auto px-4">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12">
