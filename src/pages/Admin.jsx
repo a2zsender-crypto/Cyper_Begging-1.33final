@@ -35,6 +35,15 @@ export default function Admin() {
     });
   }, []);
 
+  // --- MỚI: Tự động chuyển tab khi URL thay đổi (Fix lỗi click notification không nhảy tab) ---
+  useEffect(() => {
+      const urlTab = searchParams.get('tab');
+      if (urlTab && urlTab !== activeTab) {
+          setActiveTab(urlTab);
+      }
+  }, [searchParams, activeTab]);
+  // ----------------------------------------------------------------------------------------
+
   async function checkRole(uid) {
     try {
         let userRole = 'user';
@@ -42,7 +51,7 @@ export default function Admin() {
         if (data && data.role) userRole = data.role;
         setRole(userRole);
         
-        // Điều hướng Tab thông minh
+        // Load tab ban đầu
         const urlTab = searchParams.get('tab');
         if (urlTab) setActiveTab(urlTab);
         else if (userRole === 'admin') setActiveTab('products'); 
@@ -87,18 +96,18 @@ export default function Admin() {
         <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
           {role === 'admin' && (
               <>
-                <button onClick={() => setActiveTab('products')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='products' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Package size={20}/> {t('Sản phẩm', 'Products')}</button>
-                <button onClick={() => setActiveTab('orders')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='orders' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><ShoppingBag size={20}/> {t('Đơn hàng', 'Orders')}</button>
-                <button onClick={() => setActiveTab('contacts')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='contacts' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><MessageSquare size={20}/> {t('Hỗ trợ KH', 'Support')}</button>
-                <button onClick={() => setActiveTab('users')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='users' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Users size={20}/> {t('Người dùng', 'Users')}</button>
-                <button onClick={() => setActiveTab('settings')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='settings' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Settings size={20}/> {t('Cấu hình', 'Settings')}</button>
+                <button onClick={() => { setActiveTab('products'); navigate('/admin?tab=products'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='products' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Package size={20}/> {t('Sản phẩm', 'Products')}</button>
+                <button onClick={() => { setActiveTab('orders'); navigate('/admin?tab=orders'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='orders' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><ShoppingBag size={20}/> {t('Đơn hàng', 'Orders')}</button>
+                <button onClick={() => { setActiveTab('contacts'); navigate('/admin?tab=contacts'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='contacts' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><MessageSquare size={20}/> {t('Hỗ trợ KH', 'Support')}</button>
+                <button onClick={() => { setActiveTab('users'); navigate('/admin?tab=users'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='users' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Users size={20}/> {t('Người dùng', 'Users')}</button>
+                <button onClick={() => { setActiveTab('settings'); navigate('/admin?tab=settings'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='settings' ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><Settings size={20}/> {t('Cấu hình', 'Settings')}</button>
               </>
           )}
 
           {role !== 'admin' && (
               <>
-                <button onClick={() => setActiveTab('orders')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='orders' ? 'bg-green-50 text-green-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><ShoppingBag size={20}/> {t('Đơn hàng của tôi', 'My Orders')}</button>
-                <button onClick={() => setActiveTab('contacts')} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='contacts' ? 'bg-green-50 text-green-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><MessageSquare size={20}/> {t('Hỗ trợ & Phản hồi', 'Support & Replies')}</button>
+                <button onClick={() => { setActiveTab('orders'); navigate('/admin?tab=orders'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='orders' ? 'bg-green-50 text-green-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><ShoppingBag size={20}/> {t('Đơn hàng của tôi', 'My Orders')}</button>
+                <button onClick={() => { setActiveTab('contacts'); navigate('/admin?tab=contacts'); }} className={`w-full text-left px-4 py-3 rounded-lg flex gap-3 transition ${activeTab==='contacts' ? 'bg-green-50 text-green-700 font-bold' : 'hover:bg-slate-50 text-slate-600'}`}><MessageSquare size={20}/> {t('Hỗ trợ & Phản hồi', 'Support & Replies')}</button>
               </>
           )}
         </nav>
@@ -116,7 +125,7 @@ export default function Admin() {
             <AdminContacts 
                 session={session} 
                 role={role} 
-                activeTicketId={searchParams.get('ticketId')} // Truyền ID ticket cần mở
+                activeTicketId={searchParams.get('ticketId')} 
             />
         )}
         
