@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
 import { supabase } from '../supabaseClient';
-import { Trash2, CreditCard, MapPin, Send, Eye, EyeOff, CheckSquare, Square } from 'lucide-react';
+import { Trash2, CreditCard, MapPin, Send, Eye, EyeOff, CheckSquare, Square, UserCheck } from 'lucide-react';
 
 export default function Cart() {
   const { cart, removeFromCart, updateQuantity } = useCart();
-  const { t, lang } = useLang(); // Lấy biến lang ở đây để gửi sang server
+  const { t, lang } = useLang(); // Lấy biến lang (vi/en)
   
-  // Session State
-  const [session, setSession] = useState(null);
+  // User State
+  const [user, setUser] = useState(null);
 
   // Form State
   const [loading, setLoading] = useState(false);
@@ -18,43 +18,45 @@ export default function Cart() {
       contactMethod: 'Telegram', contactInfo: ''
   });
 
-  // Register State
+  // State Đăng ký tài khoản
   const [isRegister, setIsRegister] = useState(false);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const hasPhysical = cart.some(p => !p.is_digital);
+  const hasPhysical = cart.some(p => !p.is_digital); 
 
-  // 1. Kiểm tra đăng nhập khi vào trang Cart
+  // 1. KIỂM TRA ĐĂNG NHẬP & TỰ ĐIỀN THÔNG TIN
   useEffect(() => {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-          setSession(session);
-          if (session?.user) {
-              // Tự động điền thông tin nếu đã đăng nhập
+      const checkUser = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              setUser(user);
               setFormData(prev => ({
                   ...prev,
-                  email: session.user.email,
-                  name: session.user.user_metadata?.full_name || ''
+                  email: user.email,
+                  name: user.user_metadata?.full_name || prev.name
               }));
           }
-      });
+      };
+      checkUser();
   }, []);
 
+  // Xử lý thanh toán
   const handleCheckout = async () => {
       if (!formData.name || !formData.email) return alert(t('Vui lòng điền Tên và Email', 'Please fill Name and Email'));
       if (hasPhysical && (!formData.phone || !formData.address)) return alert(t('Vui lòng điền địa chỉ giao hàng', 'Please fill shipping address'));
       
-      // Chỉ validate mật khẩu nếu user CHƯA đăng nhập và CHỌN đăng ký
-      if (!session && isRegister && password.length < 6) {
+      // Validate Mật khẩu (Chỉ khi chưa đăng nhập và có tích chọn đăng ký)
+      if (!user && isRegister && password.length < 6) {
           return alert(t('Mật khẩu phải từ 6 ký tự trở lên', 'Password must be at least 6 characters'));
       }
 
       setLoading(true);
 
       try {
-          // 1. NẾU CHƯA ĐĂNG NHẬP VÀ CHỌN ĐĂNG KÝ -> TẠO TÀI KHOẢN
-          if (!session && isRegister) {
+          // 2. NẾU CHƯA ĐĂNG NHẬP VÀ CHỌN ĐĂNG KÝ -> TẠO TÀI KHOẢN
+          if (!user && isRegister) {
               const { error: authError } = await supabase.auth.signUp({
                   email: formData.email,
                   password: password,
@@ -63,14 +65,14 @@ export default function Cart() {
 
               if (authError) {
                   if (authError.message.includes('already registered')) {
-                      alert(t('Email này đã có tài khoản. Tiếp tục thanh toán với tư cách khách.', 'Email already registered. Proceeding as guest checkout.'));
+                      alert(t('Email này đã có tài khoản. Thanh toán như khách.', 'Email exists. Guest checkout.'));
                   } else {
                       throw new Error(t('Lỗi đăng ký: ', 'Registration Error: ') + authError.message);
                   }
               }
           }
 
-          // 2. GỌI EDGE FUNCTION THANH TOÁN
+          // 3. GỌI EDGE FUNCTION (Đã thêm language)
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
                   items: cart.map(i => ({ id: i.id, quantity: i.quantity })),
@@ -80,14 +82,15 @@ export default function Cart() {
                   contactInfo: formData.contactInfo || (formData.contactMethod === 'Telegram' ? formData.contactInfo : formData.phone),
                   shippingAddress: formData.address,
                   phoneNumber: formData.phone,
-                  language: lang // Gửi ngôn ngữ hiện tại (vi/en) sang server
+                  
+                  // QUAN TRỌNG: Gửi ngôn ngữ hiện tại sang Server để lấy tên SP đúng
+                  language: lang 
               }
           });
 
           if (error) throw error;
           if (data?.error) throw new Error(data.error);
 
-          // 3. CHUYỂN HƯỚNG SANG OXAPAY
           if (data?.payUrl) {
               window.location.href = data.payUrl;
           }
@@ -106,7 +109,7 @@ export default function Cart() {
   );
 
   return (
-    <div className="max-w-6xl mx-auto py-10 grid grid-cols-1 lg:grid-cols-3 gap-8 px-4">
+    <div className="max-w-6xl mx-auto py-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* CỘT TRÁI: SẢN PHẨM */}
         <div className="lg:col-span-2 space-y-4">
@@ -117,6 +120,7 @@ export default function Cart() {
                     <div className="flex-1">
                         <h3 className="font-bold text-slate-800 line-clamp-1">{lang === 'vi' ? item.title : (item.title_en || item.title)}</h3>
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
+                        
                         <div className="flex items-center gap-3 mt-2">
                             <button onClick={()=>updateQuantity(item.id, -1)} className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">-</button>
                             <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
@@ -132,28 +136,31 @@ export default function Cart() {
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
+            {/* Nếu đã đăng nhập thì hiện thông báo nhỏ */}
+            {user && (
+                <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm mb-4 flex items-center gap-2">
+                    <UserCheck size={16}/> {t('Đang đăng nhập:', 'Logged in as:')} <strong>{user.email}</strong>
+                </div>
+            )}
+
             <div className="space-y-4">
-                {/* Họ tên */}
                 <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">{t('Họ tên', 'Full Name')}</label>
                     <input className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition" 
                         value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})}/>
                 </div>
 
-                {/* Email (QUAN TRỌNG) */}
-                <div className={`p-3 rounded-xl border ${session ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
-                    <label className={`block text-xs font-bold mb-1 uppercase ${session ? 'text-green-800' : 'text-slate-700'}`}>{t('Email nhận hàng', 'Email Address')}</label>
-                    <input 
-                        type="email" 
-                        className={`w-full border border-slate-200 p-3 rounded-xl outline-none transition bg-white ${session ? 'text-gray-500 cursor-not-allowed' : 'focus:ring-2 focus:ring-yellow-500'}`}
+                <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200">
+                    <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">{t('Email (Quan trọng)', 'Email (Important)')}</label>
+                    <input type="email" className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-yellow-500 outline-none transition bg-white" 
                         placeholder="example@gmail.com"
                         value={formData.email} 
                         onChange={e=>setFormData({...formData, email: e.target.value})}
-                        disabled={!!session} // Khóa ô email nếu đã đăng nhập
+                        readOnly={!!user} // Nếu có user thì không cho sửa email để tránh lỗi logic
                     />
                     
-                    {/* --- LOGIC ẨN/HIỆN ĐĂNG KÝ --- */}
-                    {!session && (
+                    {/* CHỈ HIỆN ĐĂNG KÝ NẾU CHƯA CÓ USER */}
+                    {!user && (
                         <>
                             <div className="mt-3 flex items-start gap-2 cursor-pointer group" onClick={() => setIsRegister(!isRegister)}>
                                 <div className={`mt-0.5 ${isRegister ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
@@ -187,12 +194,10 @@ export default function Cart() {
                             )}
                         </>
                     )}
-                    {/* ----------------------------- */}
                     
                     <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
-                {/* Shipping Info */}
                 {hasPhysical && (
                     <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 space-y-3">
                         <div className="flex items-center gap-2 text-orange-800 font-bold text-sm mb-1">
@@ -205,7 +210,6 @@ export default function Cart() {
                     </div>
                 )}
 
-                {/* Contact Info */}
                 <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-1">
                         <label className="block text-xs font-bold text-slate-600 mb-1">Contact Via</label>
