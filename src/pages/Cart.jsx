@@ -5,8 +5,8 @@ import { supabase } from '../supabaseClient';
 import { Trash2, CreditCard, MapPin, Send, Eye, EyeOff, CheckSquare, Square, UserCheck } from 'lucide-react';
 
 export default function Cart() {
-  const { cart, removeFromCart, updateQuantity } = useCart();
-  const { t, lang } = useLang(); // Lấy biến lang (vi/en)
+  const { cart, removeFromCart, updateQuantity, clearCart } = useCart(); // Lấy thêm clearCart
+  const { t, lang } = useLang(); 
   
   // User State
   const [user, setUser] = useState(null);
@@ -26,7 +26,7 @@ export default function Cart() {
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const hasPhysical = cart.some(p => !p.is_digital); 
 
-  // 1. KIỂM TRA ĐĂNG NHẬP & TỰ ĐIỀN THÔNG TIN
+  // 1. KIỂM TRA ĐĂNG NHẬP
   useEffect(() => {
       const checkUser = async () => {
           const { data: { user } } = await supabase.auth.getUser();
@@ -47,7 +47,6 @@ export default function Cart() {
       if (!formData.name || !formData.email) return alert(t('Vui lòng điền Tên và Email', 'Please fill Name and Email'));
       if (hasPhysical && (!formData.phone || !formData.address)) return alert(t('Vui lòng điền địa chỉ giao hàng', 'Please fill shipping address'));
       
-      // Validate Mật khẩu (Chỉ khi chưa đăng nhập và có tích chọn đăng ký)
       if (!user && isRegister && password.length < 6) {
           return alert(t('Mật khẩu phải từ 6 ký tự trở lên', 'Password must be at least 6 characters'));
       }
@@ -72,7 +71,7 @@ export default function Cart() {
               }
           }
 
-          // 3. GỌI EDGE FUNCTION (Đã thêm language)
+          // 3. GỌI EDGE FUNCTION
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
                   items: cart.map(i => ({ id: i.id, quantity: i.quantity })),
@@ -82,8 +81,6 @@ export default function Cart() {
                   contactInfo: formData.contactInfo || (formData.contactMethod === 'Telegram' ? formData.contactInfo : formData.phone),
                   shippingAddress: formData.address,
                   phoneNumber: formData.phone,
-                  
-                  // QUAN TRỌNG: Gửi ngôn ngữ hiện tại sang Server để lấy tên SP đúng
                   language: lang 
               }
           });
@@ -92,6 +89,9 @@ export default function Cart() {
           if (data?.error) throw new Error(data.error);
 
           if (data?.payUrl) {
+              // --- QUAN TRỌNG: XÓA GIỎ HÀNG TRƯỚC KHI CHUYỂN TRANG ---
+              clearCart(); 
+              // --------------------------------------------------------
               window.location.href = data.payUrl;
           }
 
@@ -136,7 +136,6 @@ export default function Cart() {
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
-            {/* Nếu đã đăng nhập thì hiện thông báo nhỏ */}
             {user && (
                 <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm mb-4 flex items-center gap-2">
                     <UserCheck size={16}/> {t('Đang đăng nhập:', 'Logged in as:')} <strong>{user.email}</strong>
@@ -156,10 +155,9 @@ export default function Cart() {
                         placeholder="example@gmail.com"
                         value={formData.email} 
                         onChange={e=>setFormData({...formData, email: e.target.value})}
-                        readOnly={!!user} // Nếu có user thì không cho sửa email để tránh lỗi logic
+                        readOnly={!!user}
                     />
                     
-                    {/* CHỈ HIỆN ĐĂNG KÝ NẾU CHƯA CÓ USER */}
                     {!user && (
                         <>
                             <div className="mt-3 flex items-start gap-2 cursor-pointer group" onClick={() => setIsRegister(!isRegister)}>
@@ -198,7 +196,6 @@ export default function Cart() {
                     <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
-                {/* Phần còn lại giữ nguyên */}
                 {hasPhysical && (
                     <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 space-y-3">
                         <div className="flex items-center gap-2 text-orange-800 font-bold text-sm mb-1">
