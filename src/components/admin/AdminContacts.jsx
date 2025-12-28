@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../supabaseClient';
 import { MessageSquare, Plus, X, Send } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 
 export default function AdminContacts({ session, role, activeTicketId }) {
@@ -14,38 +14,29 @@ export default function AdminContacts({ session, role, activeTicketId }) {
   const [replyMessage, setReplyMessage] = useState('');
   const chatEndRef = useRef(null);
 
-  // Fetch danh sách khi component load
   useEffect(() => {
     fetchContacts();
   }, [role, session]);
 
-  // LOGIC QUAN TRỌNG: MỞ TICKET NẾU CÓ URL PARAM HOẶC SỰ KIỆN
+  // LOGIC 1: MỞ TICKET NẾU CÓ PROP TỪ URL (Chạy khi mount)
   useEffect(() => {
-      // Chỉ chạy khi danh sách contacts đã có dữ liệu
       if (activeTicketId && contacts.length > 0) {
-          // Ép kiểu về string để so sánh chính xác (URL là string, DB là number)
-          const ticket = contacts.find(c => c.id.toString() === activeTicketId.toString());
-          
-          if (ticket) {
-              // Nếu đang mở đúng ticket đó rồi thì thôi, chưa thì mở
-              if (!showTicketModal || showTicketModal.id.toString() !== activeTicketId.toString()) {
-                  openTicketChat(ticket);
-              }
-          }
+          const ticket = contacts.find(c => c.id.toString() === activeTicketId);
+          if (ticket) openTicketChat(ticket);
       }
-  }, [activeTicketId, contacts]); 
+  }, [activeTicketId, contacts]);
 
-  // LẮNG NGHE SỰ KIỆN "FORCE_OPEN_TICKET" (Xử lý khi click thông báo mà URL không đổi)
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN "FORCE_OPEN_TICKET" TỪ LAYOUT (Fix lỗi click khi đang ở trang này)
   useEffect(() => {
       const handleForceOpen = (e) => {
           const ticketId = e.detail;
-          const ticket = contacts.find(c => c.id.toString() === ticketId.toString());
+          const ticket = contacts.find(c => c.id.toString() === ticketId);
           if (ticket) {
               openTicketChat(ticket);
           } else {
-              // Nếu chưa có trong list (ví dụ list cũ), fetch lại
+              // Nếu chưa có trong list, fetch lại rồi mở
               fetchContacts().then((data) => {
-                  const newTicket = data?.find(c => c.id.toString() === ticketId.toString());
+                  const newTicket = data?.find(c => c.id.toString() === ticketId);
                   if (newTicket) openTicketChat(newTicket);
               });
           }
@@ -55,10 +46,10 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       return () => window.removeEventListener('FORCE_OPEN_TICKET', handleForceOpen);
   }, [contacts]);
 
-  // Scroll xuống cuối khi chat
+  // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
 
-  // REALTIME LIST
+  // REALTIME CONTACTS LIST
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts-list')
@@ -75,7 +66,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT ROOM
+  // REALTIME CHAT
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-room-${showTicketModal.id}`)
@@ -104,7 +95,6 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       const { data } = await supabase.from('contact_replies').select('*').eq('contact_id', ticket.id).order('created_at', { ascending: true });
       setTicketReplies(data || []);
       
-      // Nếu admin mở -> đánh dấu đã xem
       if (role === 'admin' && ticket.status === 'new') {
           await supabase.from('contacts').update({ status: 'processed' }).eq('id', ticket.id);
       }
