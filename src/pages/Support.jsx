@@ -378,14 +378,14 @@ export default function Support() {
                     <span className="text-blue-600 text-sm font-bold flex items-center justify-center gap-1 group-hover:gap-2 transition-all">{t('Chat ngay', 'Chat Now')} <ChevronRight size={16}/></span>
                 </a>
 
-                {/* 3. Email */}
+                {/* 3. Email (ĐÃ SỬA NỘI DUNG VÀ BỎ CLASS CŨ) */}
                 <a 
                     href={`mailto:${settings.contact_email || 'support@anvu.vn'}`} 
                     className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:border-blue-500 hover:shadow-lg transition text-center group h-full flex flex-col justify-center"
                 >
                     <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mb-5 group-hover:scale-110 transition"><Mail size={32}/></div>
                     <h3 className="font-bold text-slate-800 text-lg mb-2">Email</h3>
-                    <p className="text-sm text-slate-500 mb-4 font-mono bg-slate-50 p-1 rounded px-2 inline-block mx-auto">{settings.contact_email || 'support@anvu.vn'}</p>
+                    <p className="text-sm text-slate-500 mb-4">{t('Gửi mail cho chúng tôi và nhận phản hồi trong thời gian sớm nhất.', 'Send us an email and receive a response as soon as possible.')}</p>
                     <span className="text-blue-600 text-sm font-bold flex items-center justify-center gap-1 group-hover:gap-2 transition-all">{t('Gửi Email', 'Send Email')} <ChevronRight size={16}/></span>
                 </a>
             </div>
