@@ -47,7 +47,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 3. LOGIC REALTIME CHUÔNG (SỬA LẠI TÊN KÊNH CHO CHẮC CHẮN)
+  // 3. LOGIC REALTIME CHUÔNG (CHẮC CHẮN NHẬN CHO CẢ USER)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -56,7 +56,7 @@ export default function Layout() {
 
       const uid = session.user.id;
 
-      // Fetch 10 thông báo mới nhất
+      // Fetch 10 thông báo cũ
       const fetchNoti = async () => {
           const { data } = await supabase.from('notifications')
               .select('*')
@@ -70,14 +70,17 @@ export default function Layout() {
       };
       fetchNoti();
 
-      // Kênh riêng biệt cho mỗi user
-      const channel = supabase.channel(`noti-user-${uid}`)
+      // Đăng ký kênh riêng cho User
+      const channel = supabase.channel(`noti-${uid}`)
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, 
               (payload) => {
-                  setNotifications(prev => [payload.new, ...prev]);
-                  setUnreadCount(prev => prev + 1);
-                  toast.info(`🔔 ${payload.new.title}`);
+                  // Chỉ nhận nếu đúng user_id (Dù filter đã lọc, check lại cho chắc)
+                  if(payload.new.user_id === uid) {
+                      setNotifications(prev => [payload.new, ...prev]);
+                      setUnreadCount(prev => prev + 1);
+                      toast.info(`🔔 ${payload.new.title}`);
+                  }
               }
           )
           .subscribe();
@@ -87,8 +90,9 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
-  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHÔNG MỞ LẠI MODAL)
+  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHI ĐANG Ở TRANG RỒI CLICK LẠI)
   const handleReadNoti = async (noti) => {
+      // 1. Đánh dấu đã đọc
       if (!noti.is_read) {
           await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
           setUnreadCount(prev => Math.max(0, prev - 1));
@@ -97,14 +101,15 @@ export default function Layout() {
       
       setShowNotiDropdown(false);
 
+      // 2. Điều hướng
       if (noti.link) {
           navigate(noti.link);
           
-          // NẾU LINK CÓ CHỨA ticketId, BẮN SỰ KIỆN ĐỂ AdminContacts BIẾT
+          // --- MỚI: BẮN SỰ KIỆN NẾU LÀ LINK TICKET ---
+          // Giúp AdminContacts biết để mở lại modal ngay cả khi URL không đổi
           if (noti.link.includes('ticketId=')) {
              try {
                  const ticketId = noti.link.split('ticketId=')[1];
-                 // Bắn sự kiện để AdminContacts.jsx nghe thấy
                  window.dispatchEvent(new CustomEvent('FORCE_OPEN_TICKET', { detail: ticketId }));
              } catch(e) { console.error(e); }
           }
@@ -225,7 +230,7 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
-      {/* FOOTER GIỮ NGUYÊN (ĐÃ LƯỢC BỚT ĐỂ GỌN CODE NHƯNG BẠN GIỮ LẠI NỘI DUNG CŨ NHÉ) */}
+      {/* FOOTER (Giữ nguyên) */}
       <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-20">
         <div className="container mx-auto px-4">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12">
