@@ -198,6 +198,7 @@ export default function Cart() {
                     <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
+                {/* Phần còn lại giữ nguyên */}
                 {hasPhysical && (
                     <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 space-y-3">
                         <div className="flex items-center gap-2 text-orange-800 font-bold text-sm mb-1">
@@ -227,6 +228,7 @@ export default function Cart() {
                 </div>
             </div>
 
+            {/* Tổng tiền & Nút Pay */}
             <div className="mt-8 pt-6 border-t">
                 <div className="flex justify-between items-center mb-6">
                     <span className="text-xl font-bold text-slate-800">{t('Tổng cộng:', 'Total:')}</span>
