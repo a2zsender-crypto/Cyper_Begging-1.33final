@@ -47,7 +47,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 3. LOGIC REALTIME CHUÔNG (Đã tối ưu tên kênh theo ID user để không bị lạc tin)
+  // 3. LOGIC REALTIME CHUÔNG (SỬA LẠI TÊN KÊNH CHO CHẮC CHẮN)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -70,7 +70,7 @@ export default function Layout() {
       };
       fetchNoti();
 
-      // Kênh riêng biệt cho mỗi user để đảm bảo nhận tin chính chủ
+      // Kênh riêng biệt cho mỗi user
       const channel = supabase.channel(`noti-user-${uid}`)
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, 
@@ -87,9 +87,8 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
-  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHÔNG NHẢY MODAL KHI ĐANG Ở TRANG ĐÓ)
+  // XỬ LÝ CLICK THÔNG BÁO (FIX LỖI KHÔNG MỞ LẠI MODAL)
   const handleReadNoti = async (noti) => {
-      // 1. Đánh dấu đã đọc
       if (!noti.is_read) {
           await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
           setUnreadCount(prev => Math.max(0, prev - 1));
@@ -98,15 +97,14 @@ export default function Layout() {
       
       setShowNotiDropdown(false);
 
-      // 2. Logic điều hướng thông minh
       if (noti.link) {
           navigate(noti.link);
           
-          // NẾU LÀ TICKET -> Bắn sự kiện để AdminContacts.jsx biết mà mở lại modal
+          // NẾU LINK CÓ CHỨA ticketId, BẮN SỰ KIỆN ĐỂ AdminContacts BIẾT
           if (noti.link.includes('ticketId=')) {
              try {
                  const ticketId = noti.link.split('ticketId=')[1];
-                 // Bắn sự kiện Custom Event
+                 // Bắn sự kiện để AdminContacts.jsx nghe thấy
                  window.dispatchEvent(new CustomEvent('FORCE_OPEN_TICKET', { detail: ticketId }));
              } catch(e) { console.error(e); }
           }
@@ -227,13 +225,10 @@ export default function Layout() {
 
       <main className="flex-grow container mx-auto px-4"><Outlet /></main>
       
-      {/* FOOTER */}
+      {/* FOOTER GIỮ NGUYÊN (ĐÃ LƯỢC BỚT ĐỂ GỌN CODE NHƯNG BẠN GIỮ LẠI NỘI DUNG CŨ NHÉ) */}
       <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-20">
         <div className="container mx-auto px-4">
-            
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12">
-                
-                {/* CỘT 1 */}
                 <div className="md:col-span-4 flex flex-col items-start">
                     <div className="flex items-center gap-2 text-xl font-bold text-slate-800 mb-4">
                         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Bitcoin size={20}/></div>
@@ -245,8 +240,6 @@ export default function Layout() {
                             : (settings.footer_text_en || 'Trusted, Secure, Fast. Automated sales system 24/7.')}
                     </p>
                 </div>
-
-                {/* CỘT 2 */}
                 <div className="md:col-span-3">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Liên hệ', 'Contact')}</h4>
                     <ul className="space-y-3 text-sm text-slate-500">
@@ -255,8 +248,6 @@ export default function Layout() {
                         <li className="flex items-center gap-2"><Mail size={16} className="text-blue-500"/> {settings.contact_email || 'Email Support'}</li>
                     </ul>
                 </div>
-                
-                {/* CỘT 3 */}
                 <div className="md:col-span-2">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Hỗ trợ', 'Support')}</h4>
                     <ul className="space-y-3 text-sm text-slate-500">
@@ -265,25 +256,14 @@ export default function Layout() {
                         <li><Link to="/support#faq" className="hover:text-blue-600 transition">FAQ / Help Center</Link></li>
                     </ul>
                 </div>
-                
-                {/* CỘT 4 */}
                 <div className="md:col-span-3">
                     <h4 className="font-bold text-slate-800 mb-4 text-base">{t('Thanh toán', 'Payment')}</h4>
                     <p className="text-xs text-slate-400 mb-3">Secured by Oxapay (USDT, BTC, ETH)</p>
-                    
                     <div className="flex flex-col gap-3">
                         <div className="flex items-center gap-3">
-                            {/* Logo Oxapay */}
                             <div className="border border-slate-200 rounded-xl px-3 py-1.5 bg-white shadow-sm hover:shadow-md transition cursor-pointer h-12 flex items-center justify-center">
-                                <img 
-                                    src="/oxapay.png" 
-                                    alt="Oxapay" 
-                                    className="h-6 w-auto object-contain"
-                                    onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerText = 'Oxapay'; }}
-                                />
+                                <img src="/oxapay.png" alt="Oxapay" className="h-6 w-auto object-contain" onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.innerText = 'Oxapay'; }}/>
                             </div>
-
-                            {/* Các Icon Coin (Thứ tự mới: USDT, BTC, ETH) */}
                             <div className="flex items-center gap-2">
                                 <img src="/usdt.png" alt="USDT" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Tether" onError={(e)=>e.target.style.display='none'}/>
                                 <img src="/btc.png" alt="BTC" className="w-8 h-8 rounded-full shadow-sm bg-white border border-slate-100 hover:scale-110 transition" title="Bitcoin" onError={(e)=>e.target.style.display='none'}/>
@@ -292,10 +272,7 @@ export default function Layout() {
                         </div>
                     </div>
                 </div>
-
             </div>
-
-            {/* COPYRIGHT */}
             <div className="border-t border-gray-100 pt-8 flex flex-col md:flex-row justify-between items-center text-sm text-slate-400">
                 <p>© 2025 {settings.site_name || 'CryptoShop'}. All rights reserved.</p>
                 <div className="flex gap-4 mt-2 md:mt-0">
