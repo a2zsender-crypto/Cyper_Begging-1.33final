@@ -166,8 +166,9 @@ export default function Contact() {
                         />
                         {isLoggedIn && <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />}
                     </div>
-                    {/* Đã sửa text song ngữ tại đây */}
-                    {isLoggedIn && <p className="text-[10px] text-blue-600 mt-1 italic">
+                    
+                    {/* --- ĐÃ SỬA DÒNG NÀY --- */}
+                    {isLoggedIn && <p className="text-[10px] text-blue-600 mt-1 italic leading-tight">
                         {t(
                             "Vì tài khoản đăng nhập sử dụng địa chỉ email là duy nhất, nếu muốn thay đổi email, vui lòng tạo tài khoản mới.",
                             "Since the login account uses a unique email address, if you want to change the email, please create a new account."
