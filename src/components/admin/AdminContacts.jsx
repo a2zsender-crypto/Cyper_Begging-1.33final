@@ -18,23 +18,25 @@ export default function AdminContacts({ session, role, activeTicketId }) {
     fetchContacts();
   }, [role, session]);
 
-  // LOGIC 1: MỞ TICKET NẾU CÓ PROP TỪ URL (Chạy khi mount)
+  // LOGIC 1: MỞ TICKET KHI MOUNT (Nếu có prop activeTicketId)
   useEffect(() => {
+      // Chờ contacts load xong mới mở
       if (activeTicketId && contacts.length > 0) {
           const ticket = contacts.find(c => c.id.toString() === activeTicketId);
           if (ticket) openTicketChat(ticket);
       }
   }, [activeTicketId, contacts]);
 
-  // LOGIC 2: LẮNG NGHE SỰ KIỆN "FORCE_OPEN_TICKET" TỪ LAYOUT (Fix lỗi click khi đang ở trang này)
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (ĐỂ MỞ KHI ĐANG Ở TRANG NÀY)
   useEffect(() => {
       const handleForceOpen = (e) => {
           const ticketId = e.detail;
+          // Tìm trong list hiện tại
           const ticket = contacts.find(c => c.id.toString() === ticketId);
           if (ticket) {
               openTicketChat(ticket);
           } else {
-              // Nếu chưa có trong list, fetch lại rồi mở
+              // Nếu không thấy (có thể là ticket mới), fetch lại rồi mở
               fetchContacts().then((data) => {
                   const newTicket = data?.find(c => c.id.toString() === ticketId);
                   if (newTicket) openTicketChat(newTicket);
@@ -49,7 +51,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
   // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
 
-  // REALTIME CONTACTS LIST
+  // REALTIME
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts-list')
