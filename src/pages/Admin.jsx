@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useLang } from '../context/LangContext';
 
-// Import Components Con
 import AdminProducts from '../components/admin/AdminProducts';
 import AdminOrders from '../components/admin/AdminOrders';
 import AdminContacts from '../components/admin/AdminContacts';
@@ -23,7 +22,6 @@ export default function Admin() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // 1. Kiểm tra đăng nhập và Quyền
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -35,14 +33,13 @@ export default function Admin() {
     });
   }, []);
 
-  // --- MỚI: Tự động chuyển tab khi URL thay đổi (Fix lỗi click notification không nhảy tab) ---
+  // --- Tự động chuyển tab khi URL thay đổi ---
   useEffect(() => {
       const urlTab = searchParams.get('tab');
       if (urlTab && urlTab !== activeTab) {
           setActiveTab(urlTab);
       }
   }, [searchParams, activeTab]);
-  // ----------------------------------------------------------------------------------------
 
   async function checkRole(uid) {
     try {
@@ -51,7 +48,6 @@ export default function Admin() {
         if (data && data.role) userRole = data.role;
         setRole(userRole);
         
-        // Load tab ban đầu
         const urlTab = searchParams.get('tab');
         if (urlTab) setActiveTab(urlTab);
         else if (userRole === 'admin') setActiveTab('products'); 
@@ -81,7 +77,7 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-gray-800">
       
-      {/* --- SIDEBAR --- */}
+      {/* SIDEBAR */}
       <div className={`w-64 bg-white shadow-md flex flex-col fixed h-full z-10 border-r ${role === 'user' ? 'hidden md:flex' : ''}`}>
         <div className="p-6 border-b flex items-center gap-3">
             <div className={`p-2 rounded-lg ${role==='admin' ? 'bg-blue-600' : 'bg-green-600'} text-white shadow`}>
@@ -114,7 +110,7 @@ export default function Admin() {
         <button onClick={handleLogout} className="p-4 m-4 text-red-600 flex gap-2 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-100 transition justify-center font-medium"><LogOut size={20}/> {t('Đăng xuất', 'Logout')}</button>
       </div>
 
-      {/* --- MAIN CONTENT AREA --- */}
+      {/* CONTENT */}
       <div className={`flex-1 p-8 overflow-auto ${role === 'admin' ? 'ml-64' : 'md:ml-64'}`}>
         
         {activeTab === 'products' && role === 'admin' && <AdminProducts session={session} />}
