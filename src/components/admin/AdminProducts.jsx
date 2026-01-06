@@ -6,13 +6,14 @@ import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
 
 export default function AdminProducts() {
-  const { t } = useLang();
+  const { t, lang } = useLang(); // SỬA: Lấy thêm biến lang
   const queryClient = useQueryClient(); 
   
   // --- FETCH DATA ---
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
+      // Select * đã bao gồm title_en
       const { data, error } = await supabase.from('products').select('*').order('id', {ascending: false});
       if (error) throw error;
       return data;
@@ -315,7 +316,15 @@ export default function AdminProducts() {
                  <td className="p-4 flex gap-3 items-center">
                     <img src={p.images?.[0]} className="w-10 h-10 rounded object-cover bg-slate-100 border"/> 
                     <div>
-                        <span className="font-medium text-sm text-slate-700 block">{p.title}</span>
+                        {/* SỬA: Logic hiển thị tên đa ngôn ngữ */}
+                        <span className="font-medium text-sm text-slate-700 block">
+                            {lang === 'vi' ? p.title : (p.title_en || p.title)}
+                        </span>
+                        {/* Hiển thị tên gốc nếu đang xem tiếng Anh */}
+                        {lang !== 'vi' && p.title_en && (
+                            <span className="text-xs text-slate-400 block">VN: {p.title}</span>
+                        )}
+
                         {p.variants?.length > 0 && <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">{p.variants.length} Option Groups</span>}
                     </div>
                  </td>
@@ -345,12 +354,12 @@ export default function AdminProducts() {
               <form onSubmit={handleSaveProduct} className="space-y-6">
                  {/* BASIC INFO */}
                  <div className="grid grid-cols-2 gap-5">
-                    <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (VN)</label><input required className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title} onChange={e=>setProductForm({...productForm, title: e.target.value})}/></div>
-                    <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (EN)</label><input className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title_en} onChange={e=>setProductForm({...productForm, title_en: e.target.value})}/></div>
+                   <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (VN)</label><input required className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title} onChange={e=>setProductForm({...productForm, title: e.target.value})}/></div>
+                   <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (EN)</label><input className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title_en} onChange={e=>setProductForm({...productForm, title_en: e.target.value})}/></div>
                  </div>
                  <div className="grid grid-cols-2 gap-5">
-                    <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Base Price (USDT)</label><input type="number" step="0.01" required className="w-full border p-2.5 rounded-lg font-mono font-bold text-green-600 focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.price} onChange={e=>setProductForm({...productForm, price: e.target.value})}/></div>
-                    <div>
+                   <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Base Price (USDT)</label><input type="number" step="0.01" required className="w-full border p-2.5 rounded-lg font-mono font-bold text-green-600 focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.price} onChange={e=>setProductForm({...productForm, price: e.target.value})}/></div>
+                   <div>
                          <label className="block text-sm font-bold mb-1.5 text-slate-600">Type</label>
                          <select className="w-full border p-2.5 rounded-lg outline-none bg-white" value={productForm.is_digital ? 'digital' : 'physical'} onChange={e => setProductForm({...productForm, is_digital: e.target.value === 'digital'})}>
                              <option value="digital">Digital (Key)</option>
@@ -414,17 +423,17 @@ export default function AdminProducts() {
                                 <table className="w-full text-sm text-left bg-white">
                                     <thead className="bg-slate-100 text-xs uppercase text-slate-500"><tr><th className="p-3">Variant</th><th className="p-3 w-32">Stock</th><th className="p-3 w-32">Action</th></tr></thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {productForm.variant_stocks.map((item, idx) => (
-                                            <tr key={idx}>
-                                                <td className="p-3 font-medium text-slate-700">{Object.entries(item.options).map(([k, v]) => <span key={k} className="mr-2 px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs border border-purple-100">{k}: {v}</span>)}</td>
-                                                <td className="p-3 font-bold text-center">{item.stock}</td>
-                                                <td className="p-3">
-                                                    <button type="button" onClick={() => setShowKeyModal({product: productForm, variant: item.options})} className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-black transition">
-                                                        <Key size={12}/> Add Keys
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                            {productForm.variant_stocks.map((item, idx) => (
+                                                <tr key={idx}>
+                                                    <td className="p-3 font-medium text-slate-700">{Object.entries(item.options).map(([k, v]) => <span key={k} className="mr-2 px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs border border-purple-100">{k}: {v}</span>)}</td>
+                                                    <td className="p-3 font-bold text-center">{item.stock}</td>
+                                                    <td className="p-3">
+                                                        <button type="button" onClick={() => setShowKeyModal({product: productForm, variant: item.options})} className="flex items-center gap-1 bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-black transition">
+                                                            <Key size={12}/> Add Keys
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
                                     </tbody>
                                 </table>
                             </div>
