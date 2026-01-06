@@ -8,7 +8,7 @@ import { toast } from 'react-toastify';
 
 export default function ProductDetail() {
   const { id } = useParams();
-  const { addToCart, cart } = useCart(); // Lấy thêm cart để check số lượng hiện tại
+  const { addToCart, cart } = useCart();
   const { lang, t } = useLang();
   const navigate = useNavigate();
   
@@ -18,6 +18,7 @@ export default function ProductDetail() {
   const [selectedOptions, setSelectedOptions] = useState({});
   const [finalPrice, setFinalPrice] = useState(0);
   const [currentStock, setCurrentStock] = useState(0); 
+  const [loadingStock, setLoadingStock] = useState(true); // Thêm state loading để tránh hiện số ảo
 
   useEffect(() => {
     supabase.from('products').select('*').eq('id', id).single().then(async ({ data }) => {
@@ -34,48 +35,71 @@ export default function ProductDetail() {
                   }
               });
               setSelectedOptions(defaults);
-          } else {
-              // Load stock ban đầu
-              checkStock(data, {});
           }
+          // Lưu ý: Không set currentStock ngay ở đây bằng data.physical_stock nữa
+          // Để useEffect bên dưới tự chạy checkStock realtime
       }
     });
   }, [id]);
 
-  // --- SỬA ĐỔI: HÀM CHECK STOCK CHUẨN XÁC (REALTIME) ---
+  // --- HÀM CHECK STOCK REALTIME (SỬA LẠI) ---
   const checkStock = async (prod, options) => {
       if (!prod) return;
+      setLoadingStock(true);
       
-      if (prod.is_digital) {
-          // NẾU LÀ DIGITAL: ĐẾM TRỰC TIẾP TỪ TABLE KEY (Bỏ qua physical_stock của products vì có thể sai cache)
-          const { count, error } = await supabase
-            .from('product_keys')
-            .select('*', { count: 'exact', head: true })
-            .eq('product_id', prod.id)
-            .eq('is_used', false)
-            .contains('variant_info', options); // Lọc theo variant info
-           
-           if(error) console.error("Check stock error:", error);
-           setCurrentStock(count || 0);
-      } else {
-          // NẾU LÀ VẬT LÝ
-          if (prod.variant_stocks && prod.variant_stocks.length > 0) {
-              const stockItem = prod.variant_stocks.find(item => {
-                  const itemOpts = item.options;
-                  const selectedKeys = Object.keys(options);
-                  if (Object.keys(itemOpts).length !== selectedKeys.length) return false;
-                  return selectedKeys.every(key => itemOpts[key] === options[key]);
-              });
-              setCurrentStock(stockItem ? parseInt(stockItem.stock) : 0);
+      try {
+          if (prod.is_digital) {
+              // LOGIC DIGITAL: Đếm trực tiếp từ product_keys. 
+              // TUYỆT ĐỐI KHÔNG fallback về prod.physical_stock hay prod.variant_stocks
+              
+              let query = supabase
+                .from('product_keys')
+                .select('*', { count: 'exact', head: true }) // Chỉ lấy số lượng, không lấy data để nhẹ
+                .eq('product_id', prod.id)
+                .eq('is_used', false);
+
+              // Nếu đang chọn biến thể (options không rỗng)
+              // Lọc key có chứa thông tin variant này
+              if (Object.keys(options).length > 0) {
+                  query = query.contains('variant_info', options);
+              }
+               
+              const { count, error } = await query;
+              
+              if (error) {
+                  console.error("Stock check error:", error);
+                  setCurrentStock(0); // Lỗi thì coi như hết hàng để an toàn
+              } else {
+                  setCurrentStock(count || 0);
+              }
+
           } else {
-              setCurrentStock(prod.physical_stock || 0);
+              // LOGIC PHYSICAL (Giữ nguyên logic lấy từ json variant_stocks)
+              if (prod.variant_stocks && prod.variant_stocks.length > 0) {
+                  const stockItem = prod.variant_stocks.find(item => {
+                      const itemOpts = item.options;
+                      const selectedKeys = Object.keys(options);
+                      if (Object.keys(itemOpts).length !== selectedKeys.length) return false;
+                      return selectedKeys.every(key => itemOpts[key] === options[key]);
+                  });
+                  setCurrentStock(stockItem ? parseInt(stockItem.stock) : 0);
+              } else {
+                  setCurrentStock(prod.physical_stock || 0);
+              }
           }
+      } catch (err) {
+          console.error(err);
+          setCurrentStock(0);
+      } finally {
+          setLoadingStock(false);
       }
   };
 
+  // Trigger checkStock mỗi khi product load xong HOẶC options thay đổi
   useEffect(() => {
       if (!product) return;
       
+      // 1. Tính giá
       let extra = 0;
       if (product.variants) {
           product.variants.forEach(v => {
@@ -86,10 +110,10 @@ export default function ProductDetail() {
       }
       setFinalPrice(product.price + extra);
 
-      // Gọi check stock mỗi khi đổi option
+      // 2. Gọi check stock realtime
       checkStock(product, selectedOptions);
 
-  }, [selectedOptions, product]);
+  }, [selectedOptions, product]); // Dependency quan trọng: selectedOptions
 
   const handleOptionChange = (variantName, value) => {
       setSelectedOptions(prev => ({ ...prev, [variantName]: value }));
@@ -100,29 +124,26 @@ export default function ProductDetail() {
       }
   };
 
-  // Chuẩn bị object để thêm vào giỏ
   const getProductToAdd = () => ({ 
       ...product, 
       price: finalPrice, 
       selectedVariants: selectedOptions,
-      maxStock: currentStock // TRUYỀN MAX STOCK VÀO GIỎ HÀNG
+      maxStock: currentStock // Quan trọng: Truyền stock thực tế vào để CartContext chặn
   });
 
-  const isOutOfStock = currentStock <= 0 && !product?.allow_external_key;
+  const isOutOfStock = !loadingStock && currentStock <= 0 && !product?.allow_external_key;
 
   const handleAddToCart = () => {
-      if(isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
+      if (loadingStock) return;
+      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
       
-      // Check thêm lần nữa ở client trước khi gọi context (UX)
-      // Tìm xem trong giỏ đã có bao nhiêu cái này rồi
       const currentCartItem = cart.find(i => 
           i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
       );
       const currentQty = currentCartItem ? currentCartItem.quantity : 0;
       
-      // Nếu không phải API mode và số lượng thêm > kho
       if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
-          return toast.warn(t(`Bạn đã có ${currentQty} sản phẩm trong giỏ. Kho chỉ còn ${currentStock}.`, `You have ${currentQty} in cart. Stock: ${currentStock}`));
+          return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left in stock.`));
       }
 
       if(product) { 
@@ -132,16 +153,16 @@ export default function ProductDetail() {
   }
 
   const handleBuyNow = () => {
-      if(isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
+      if (loadingStock) return;
+      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
       
-      // Check stock logic tương tự
       const currentCartItem = cart.find(i => 
           i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
       );
       const currentQty = currentCartItem ? currentCartItem.quantity : 0;
 
       if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
-          return toast.warn(t("Không đủ hàng trong kho để mua thêm!", "Not enough stock!"));
+          return toast.warn(t("Không đủ hàng trong kho!", "Not enough stock!"));
       }
 
       if(product) { 
@@ -179,7 +200,9 @@ export default function ProductDetail() {
           </div>
 
           <div className={`mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${!isOutOfStock ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {!isOutOfStock ? (
+              {loadingStock ? (
+                  <span className="animate-pulse">Checking stock...</span>
+              ) : !isOutOfStock ? (
                   <><CheckCircle size={16}/> {product.allow_external_key && currentStock <=0 ? t('Sẵn hàng', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
               ) : (
                   <><AlertTriangle size={16}/> {t('Hết hàng', 'Out of Stock')}</>
@@ -213,10 +236,10 @@ export default function ProductDetail() {
 
           <div className="mt-auto space-y-4">
             <div className="flex gap-4">
-              <button onClick={handleAddToCart} disabled={isOutOfStock} className="flex-1 bg-white border-2 border-blue-600 text-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={handleAddToCart} disabled={isOutOfStock || loadingStock} className="flex-1 bg-white border-2 border-blue-600 text-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 <ShoppingCart size={20}/> {t('THÊM GIỎ HÀNG', 'ADD TO CART')}
               </button>
-              <button onClick={handleBuyNow} disabled={isOutOfStock} className="flex-1 bg-red-600 text-white py-3.5 rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-200 transition flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
+              <button onClick={handleBuyNow} disabled={isOutOfStock || loadingStock} className="flex-1 bg-red-600 text-white py-3.5 rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-200 transition flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
                 <CreditCard size={20}/> {t('MUA NGAY', 'BUY NOW')}
               </button>
             </div>
