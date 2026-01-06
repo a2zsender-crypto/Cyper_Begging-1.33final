@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
 import { supabase } from '../supabaseClient';
-import { Trash2, CreditCard, MapPin, Send, Eye, EyeOff, CheckSquare, Square, UserCheck, Tag } from 'lucide-react'; // Thêm icon Tag
+import { Trash2, CreditCard, MapPin, Send, Eye, EyeOff, CheckSquare, Square, UserCheck, Tag } from 'lucide-react'; 
 
 export default function Cart() {
   const { cart, removeFromCart, updateQuantity, clearCart } = useCart(); 
@@ -85,15 +85,14 @@ export default function Cart() {
               }
           }
 
-          // 3. GỌI EDGE FUNCTION
+          // 3. GỌI EDGE FUNCTION VỚI HEADERS CHUẨN
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  // --- SỬA ĐỔI QUAN TRỌNG: Gửi thêm selectedVariants và price ---
                   items: cart.map(i => ({ 
                       id: i.id, 
                       quantity: i.quantity,
-                      selectedVariants: i.selectedVariants || {}, // Gửi biến thể
-                      price: i.price // Gửi giá đã tính toán (Base + Option)
+                      selectedVariants: i.selectedVariants || {}, 
+                      price: i.price 
                   })),
                   email: formData.email,
                   name: formData.name,
@@ -102,7 +101,9 @@ export default function Cart() {
                   shippingAddress: formData.address,
                   phoneNumber: formData.phone,
                   language: lang 
-              }
+              },
+              method: 'POST', // Đảm bảo dùng POST
+              headers: { 'Content-Type': 'application/json' } // Header quan trọng để tránh lỗi body rỗng
           });
 
           if (error) throw error;
@@ -133,7 +134,6 @@ export default function Cart() {
         <div className="lg:col-span-2 space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">{t('Giỏ hàng của bạn', 'Your Cart')}</h2>
             {cart.map((item, idx) => (
-                // Dùng cartItemId làm key nếu có, nếu không dùng id kết hợp index để tránh trùng lặp variant
                 <div key={item.cartItemId || `${item.id}-${idx}`} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex gap-4 items-center">
                     <img src={item.images?.[0]} className="w-20 h-20 object-cover rounded-lg border"/>
                     <div className="flex-1">
@@ -144,7 +144,6 @@ export default function Cart() {
                         <p className="text-green-600 font-bold mt-1">{item.price} USDT</p>
                         
                         <div className="flex items-center gap-3 mt-2">
-                            {/* Truyền cartItemId vào hàm updateQuantity (đã sửa ở bước trước) */}
                             <button onClick={()=>updateQuantity(item.cartItemId || item.id, -1)} className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">-</button>
                             <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
                             <button onClick={()=>updateQuantity(item.cartItemId || item.id, 1)} className="w-6 h-6 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">+</button>
@@ -155,7 +154,7 @@ export default function Cart() {
             ))}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN (GIỮ NGUYÊN) */}
+        {/* CỘT PHẢI: FORM THANH TOÁN */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
