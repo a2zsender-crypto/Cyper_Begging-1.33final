@@ -75,10 +75,16 @@ export default function Cart() {
           }
 
           // 3. GỌI EDGE FUNCTION
-          // Gửi đúng payload mà Server index.ts mới yêu cầu (items, email, info...)
+          // SỬA ĐỔI QUAN TRỌNG: Gửi kèm price và tên đầy đủ để server nhận diện biến thể
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  items: cart.map(i => ({ id: i.id, quantity: i.quantity })),
+                  items: cart.map(i => ({ 
+                      id: i.id, 
+                      quantity: i.quantity,
+                      price: i.price, // Gửi giá chính xác (đã chọn biến thể)
+                      name: i.title || i.name, // Gửi tên để lưu log
+                      is_digital: i.is_digital
+                  })),
                   email: formData.email,
                   name: formData.name,
                   contactMethod: formData.contactMethod,
