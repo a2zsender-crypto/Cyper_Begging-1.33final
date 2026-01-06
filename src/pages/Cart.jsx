@@ -24,7 +24,7 @@ export default function Cart() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Tính tổng tiền client (để hiển thị)
+  // Tính tổng tiền client
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const hasPhysical = cart.some(p => !p.is_digital); 
 
@@ -75,16 +75,30 @@ export default function Cart() {
           }
 
           // 3. GỌI EDGE FUNCTION
-          // SỬA ĐỔI QUAN TRỌNG: Gửi kèm price và tên đầy đủ để server nhận diện biến thể
+          // CHUẨN BỊ ITEM: Ghép tên biến thể vào tên chính để gửi lên server
+          const orderItems = cart.map(i => {
+              // Logic tìm tên biến thể: Kiểm tra các key thường gặp trong cart object
+              // Nếu bạn lưu tên biến thể ở key khác (vd: i.selected_variant), hãy sửa lại dòng này
+              const variantLabel = i.variant_name || (i.variant ? i.variant.name : '') || i.selectedSize || '';
+              
+              // Tạo tên đầy đủ: "Tên Gốc (Biến thể)"
+              // Nếu đã có tên biến thể thì ghép vào, nếu không thì giữ nguyên title
+              const fullDisplayName = variantLabel 
+                  ? `${i.title} (${variantLabel})` 
+                  : (i.name || i.title);
+
+              return { 
+                  id: i.id, 
+                  quantity: i.quantity,
+                  price: i.price,
+                  name: fullDisplayName, // Gửi tên ĐẦY ĐỦ này lên server
+                  is_digital: i.is_digital
+              };
+          });
+
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  items: cart.map(i => ({ 
-                      id: i.id, 
-                      quantity: i.quantity,
-                      price: i.price, // Gửi giá chính xác (đã chọn biến thể)
-                      name: i.title || i.name, // Gửi tên để lưu log
-                      is_digital: i.is_digital
-                  })),
+                  items: orderItems,
                   email: formData.email,
                   name: formData.name,
                   contactMethod: formData.contactMethod,
@@ -105,9 +119,7 @@ export default function Cart() {
           }
 
           if (data?.payUrl) {
-              // --- QUAN TRỌNG: XÓA GIỎ HÀNG TRƯỚC KHI CHUYỂN TRANG ---
               clearCart(); 
-              // --------------------------------------------------------
               window.location.href = data.payUrl;
           } else {
             throw new Error("Không nhận được link thanh toán từ hệ thống.");
@@ -140,7 +152,6 @@ export default function Cart() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
         {/* CỘT TRÁI: SẢN PHẨM */}
         <div className="lg:col-span-2 space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">{t('Giỏ hàng của bạn', 'Your Cart')}</h2>
@@ -148,7 +159,11 @@ export default function Cart() {
                 <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 items-center">
                     <img src={item.images?.[0] || item.image} className="w-20 h-20 object-cover rounded-lg border"/>
                     <div className="flex-1 text-center sm:text-left">
-                        <h3 className="font-bold text-slate-800 line-clamp-1">{lang === 'vi' ? item.title : (item.title_en || item.title)}</h3>
+                        <h3 className="font-bold text-slate-800 line-clamp-1">
+                            {/* Hiển thị tên kèm biến thể ở đây nếu có */}
+                            {lang === 'vi' ? item.title : (item.title_en || item.title)} 
+                            {item.variant_name ? ` (${item.variant_name})` : ''}
+                        </h3>
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
                         
                         <div className="flex items-center justify-center sm:justify-start gap-3 mt-2">
@@ -166,7 +181,7 @@ export default function Cart() {
             ))}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN */}
+        {/* CỘT PHẢI: FORM THANH TOÁN (Giữ nguyên) */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
@@ -226,7 +241,6 @@ export default function Cart() {
                             )}
                         </>
                     )}
-                    
                     <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
@@ -259,7 +273,6 @@ export default function Cart() {
                 </div>
             </div>
 
-            {/* Tổng tiền & Nút Pay */}
             <div className="mt-8 pt-6 border-t">
                 <div className="flex justify-between items-center mb-6">
                     <span className="text-xl font-bold text-slate-800">{t('Tổng cộng:', 'Total:')}</span>
