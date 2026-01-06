@@ -1,9 +1,12 @@
 import { createContext, useState, useContext, useEffect } from 'react';
-import { toast } from 'react-toastify'; // Thêm toast để báo lỗi đẹp hơn
+import { toast } from 'react-toastify'; 
+import { useLang } from './LangContext'; // IMPORT LANG CONTEXT
 
 const CartContext = createContext();
 
 export function CartProvider({ children }) {
+  const { t } = useLang(); // LẤY HÀM DỊCH
+
   const [cart, setCart] = useState(() => {
     const saved = localStorage.getItem('cart');
     return saved ? JSON.parse(saved) : [];
@@ -13,7 +16,6 @@ export function CartProvider({ children }) {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Tạo ID duy nhất cho sản phẩm trong giỏ (ID + Biến thể)
   const generateCartItemId = (product) => {
     const variantKey = product.selectedVariants 
       ? JSON.stringify(product.selectedVariants) 
@@ -26,13 +28,12 @@ export function CartProvider({ children }) {
       const cartItemId = generateCartItemId(product);
       const exist = prev.find(item => generateCartItemId(item) === cartItemId);
       
-      // LOGIC CHECK STOCK
-      // Nếu có cho phép API -> Không giới hạn (9999). Nếu không -> Lấy maxStock truyền vào
       const limit = product.allow_external_key ? 999999 : (product.maxStock || 0);
       
       if (exist) {
         if (exist.quantity + 1 > limit) {
-            toast.error(`Chỉ còn ${limit} sản phẩm trong kho!`);
+            // SỬA: Đa ngôn ngữ thông báo
+            toast.error(t(`Chỉ còn ${limit} sản phẩm trong kho!`, `Only ${limit} items left in stock!`));
             return prev;
         }
         return prev.map(item => 
@@ -42,13 +43,12 @@ export function CartProvider({ children }) {
         );
       }
 
-      // Check item mới
       if (1 > limit) {
-          toast.error("Sản phẩm đã hết hàng!");
+          // SỬA: Đa ngôn ngữ thông báo
+          toast.error(t("Sản phẩm đã hết hàng!", "Product is out of stock!"));
           return prev;
       }
 
-      // Lưu ý: product thêm vào phải chứa selectedVariants, price và maxStock
       return [...prev, { ...product, quantity: 1, cartItemId }];
     });
   };
@@ -60,12 +60,12 @@ export function CartProvider({ children }) {
       if (currentId === cartItemId) {
         const newQty = item.quantity + amount;
         
-        // LOGIC CHECK STOCK KHI TĂNG SỐ LƯỢNG
         const limit = item.allow_external_key ? 999999 : (item.maxStock || 0);
         
         if (newQty > limit) {
-            toast.warn(`Kho chỉ còn ${limit} sản phẩm này.`);
-            return item; // Giữ nguyên số lượng cũ
+            // SỬA: Đa ngôn ngữ thông báo
+            toast.warn(t(`Kho chỉ còn ${limit} sản phẩm này.`, `Only ${limit} items of this product left.`));
+            return item; 
         }
 
         return newQty > 0 ? { ...item, quantity: newQty } : item;
