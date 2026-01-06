@@ -3,11 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, CreditCard, CheckCircle, Tag, AlertTriangle, Zap } from 'lucide-react'; 
+import { ShoppingCart, CreditCard, CheckCircle, Tag, AlertTriangle, Zap, Box } from 'lucide-react'; 
+import { toast } from 'react-toastify';
 
 export default function ProductDetail() {
   const { id } = useParams();
-  const { addToCart } = useCart();
+  const { addToCart, cart } = useCart(); // Lấy thêm cart để check số lượng hiện tại
   const { lang, t } = useLang();
   const navigate = useNavigate();
   
@@ -34,18 +35,47 @@ export default function ProductDetail() {
               });
               setSelectedOptions(defaults);
           } else {
-             // Không biến thể: lấy stock tổng
-             setCurrentStock(data.physical_stock || 0);
+              // Load stock ban đầu
+              checkStock(data, {});
           }
       }
     });
   }, [id]);
 
-  // LOGIC CHECK TỒN KHO MỚI
+  // --- SỬA ĐỔI: HÀM CHECK STOCK CHUẨN XÁC (REALTIME) ---
+  const checkStock = async (prod, options) => {
+      if (!prod) return;
+      
+      if (prod.is_digital) {
+          // NẾU LÀ DIGITAL: ĐẾM TRỰC TIẾP TỪ TABLE KEY (Bỏ qua physical_stock của products vì có thể sai cache)
+          const { count, error } = await supabase
+            .from('product_keys')
+            .select('*', { count: 'exact', head: true })
+            .eq('product_id', prod.id)
+            .eq('is_used', false)
+            .contains('variant_info', options); // Lọc theo variant info
+           
+           if(error) console.error("Check stock error:", error);
+           setCurrentStock(count || 0);
+      } else {
+          // NẾU LÀ VẬT LÝ
+          if (prod.variant_stocks && prod.variant_stocks.length > 0) {
+              const stockItem = prod.variant_stocks.find(item => {
+                  const itemOpts = item.options;
+                  const selectedKeys = Object.keys(options);
+                  if (Object.keys(itemOpts).length !== selectedKeys.length) return false;
+                  return selectedKeys.every(key => itemOpts[key] === options[key]);
+              });
+              setCurrentStock(stockItem ? parseInt(stockItem.stock) : 0);
+          } else {
+              setCurrentStock(prod.physical_stock || 0);
+          }
+      }
+  };
+
   useEffect(() => {
       if (!product) return;
       
-      // 1. Tính giá
       let extra = 0;
       if (product.variants) {
           product.variants.forEach(v => {
@@ -56,20 +86,9 @@ export default function ProductDetail() {
       }
       setFinalPrice(product.price + extra);
 
-      // 2. Cập nhật Stock
-      if (product.variants && product.variants.length > 0) {
-          // Có biến thể: Tìm trong variant_stocks
-          const stockItem = product.variant_stocks?.find(item => {
-              const itemOpts = item.options;
-              const selectedKeys = Object.keys(selectedOptions);
-              if (Object.keys(itemOpts).length !== selectedKeys.length) return false;
-              return selectedKeys.every(key => itemOpts[key] === selectedOptions[key]);
-          });
-          setCurrentStock(stockItem ? parseInt(stockItem.stock) : 0);
-      } else {
-          // Không biến thể: Lấy stock tổng
-          setCurrentStock(product.physical_stock || 0);
-      }
+      // Gọi check stock mỗi khi đổi option
+      checkStock(product, selectedOptions);
+
   }, [selectedOptions, product]);
 
   const handleOptionChange = (variantName, value) => {
@@ -81,19 +100,54 @@ export default function ProductDetail() {
       }
   };
 
-  const getProductToAdd = () => ({ ...product, price: finalPrice, selectedVariants: selectedOptions });
+  // Chuẩn bị object để thêm vào giỏ
+  const getProductToAdd = () => ({ 
+      ...product, 
+      price: finalPrice, 
+      selectedVariants: selectedOptions,
+      maxStock: currentStock // TRUYỀN MAX STOCK VÀO GIỎ HÀNG
+  });
 
-  // Logic xác định hết hàng: Stock <= 0 VÀ Không bật API External
   const isOutOfStock = currentStock <= 0 && !product?.allow_external_key;
 
   const handleAddToCart = () => {
-      if(isOutOfStock) return alert(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
-      if(product) { addToCart(getProductToAdd()); alert(t("Đã thêm vào giỏ hàng!", "Added to cart!")); }
+      if(isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
+      
+      // Check thêm lần nữa ở client trước khi gọi context (UX)
+      // Tìm xem trong giỏ đã có bao nhiêu cái này rồi
+      const currentCartItem = cart.find(i => 
+          i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
+      );
+      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+      
+      // Nếu không phải API mode và số lượng thêm > kho
+      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
+          return toast.warn(t(`Bạn đã có ${currentQty} sản phẩm trong giỏ. Kho chỉ còn ${currentStock}.`, `You have ${currentQty} in cart. Stock: ${currentStock}`));
+      }
+
+      if(product) { 
+          addToCart(getProductToAdd()); 
+          toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart!")); 
+      }
   }
 
   const handleBuyNow = () => {
-      if(isOutOfStock) return alert(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
-      if(product) { addToCart(getProductToAdd()); navigate('/cart'); }
+      if(isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
+      
+      // Check stock logic tương tự
+      const currentCartItem = cart.find(i => 
+          i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
+      );
+      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+
+      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
+          return toast.warn(t("Không đủ hàng trong kho để mua thêm!", "Not enough stock!"));
+      }
+
+      if(product) { 
+          addToCart(getProductToAdd()); 
+          navigate('/cart'); 
+      }
   }
 
   if (!product) return <div className="flex justify-center items-center h-64 text-slate-400">Loading...</div>;
@@ -121,7 +175,7 @@ export default function ProductDetail() {
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4 leading-tight">{displayTitle}</h1>
           <div className="flex items-center gap-4 mb-6">
              <div className="text-3xl font-extrabold text-green-600">{finalPrice.toFixed(2)} USDT</div>
-             {product.is_digital ? <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded-full uppercase">Digital Key</span> : <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full uppercase">Physical</span>}
+             {product.is_digital ? <span className="flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded-full uppercase"><Zap size={12}/> Digital Key</span> : <span className="flex items-center gap-1 px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full uppercase"><Box size={12}/> Physical</span>}
           </div>
 
           <div className={`mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${!isOutOfStock ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
