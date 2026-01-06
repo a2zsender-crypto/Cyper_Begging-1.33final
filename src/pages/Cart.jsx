@@ -56,7 +56,6 @@ export default function Cart() {
       setLoading(true);
 
       try {
-          // Đăng ký nếu cần
           if (!user && isRegister) {
               const { error: authError } = await supabase.auth.signUp({
                   email: formData.email,
@@ -73,21 +72,38 @@ export default function Cart() {
               }
           }
 
-          // GHÉP TÊN BIẾN THỂ VÀ GỬI LÊN SERVER
+          // --- LOGIC XỬ LÝ TÊN BIẾN THỂ (ĐA THUỘC TÍNH) ---
           const itemsPayload = cart.map(i => {
+              // 1. Lấy tên gốc
               let itemName = lang === 'vi' ? i.title : (i.title_en || i.title);
-              const variantLabel = i.variant_name || 
-                                   (i.selected_variant?.name) || 
-                                   (typeof i.selected_variant === 'string' ? i.selected_variant : '') ||
-                                   '';
-              const fullName = variantLabel ? `${itemName} (${variantLabel})` : itemName;
+              
+              // 2. Xử lý chuỗi biến thể chi tiết
+              let variantDetails = '';
+
+              if (i.selectedVariants && typeof i.selectedVariants === 'object') {
+                  // Trường hợp nhiều biến thể (Object: {Color: "Red", Storage: "256GB"})
+                  // Kết quả: "Color: Red, Storage: 256GB"
+                  variantDetails = Object.entries(i.selectedVariants)
+                      .map(([key, value]) => `${key}: ${value}`)
+                      .join(', ');
+              } else if (i.variant_name) {
+                  // Trường hợp biến thể đơn giản (String)
+                  variantDetails = i.variant_name;
+              } else if (typeof i.selected_variant === 'string') {
+                  variantDetails = i.selected_variant;
+              }
+
+              // 3. Ghép chuỗi hoàn chỉnh: "iPhone 16 (Color: Titanium, Storage: 256GB)"
+              const fullName = variantDetails ? `${itemName} (${variantDetails})` : itemName;
 
               return {
                   id: i.id,
                   quantity: i.quantity,
                   price: i.price,
-                  name: fullName, 
-                  is_digital: i.is_digital
+                  name: fullName, // Gửi tên đã ghép đầy đủ lên server
+                  is_digital: i.is_digital,
+                  // Gửi kèm raw data để server lưu database nếu cần tách trường sau này
+                  selected_variants: i.selectedVariants 
               };
           });
 
@@ -137,54 +153,51 @@ export default function Cart() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* CỘT TRÁI: SẢN PHẨM */}
         <div className="lg:col-span-2 space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">{t('Giỏ hàng của bạn', 'Your Cart')}</h2>
-            {cart.map(item => (
+            {cart.map(item => {
+                // Logic hiển thị tên biến thể ở UI (tương tự như logic gửi đi)
+                let variantDisplay = '';
+                if (item.selectedVariants && typeof item.selectedVariants === 'object') {
+                     variantDisplay = Object.entries(item.selectedVariants)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(', ');
+                } else {
+                     variantDisplay = item.variant_name || item.selected_variant || '';
+                }
+
+                return (
                 <div key={item.cartItemId || item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 items-center">
                     <img src={item.images?.[0] || item.image} className="w-20 h-20 object-cover rounded-lg border"/>
                     <div className="flex-1 text-center sm:text-left">
                         <h3 className="font-bold text-slate-800 line-clamp-1">
                              {lang === 'vi' ? item.title : (item.title_en || item.title)}
-                             {(item.variant_name || item.selected_variant?.name) && 
+                             {variantDisplay && 
                                 <span className="text-sm font-normal text-gray-500 block sm:inline sm:ml-2">
-                                    ({item.variant_name || item.selected_variant?.name || item.selected_variant})
+                                    ({variantDisplay})
                                 </span>
                              }
                         </h3>
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
                         
                         <div className="flex items-center justify-center sm:justify-start gap-3 mt-2">
-                            {/* QUAN TRỌNG: Sử dụng item.cartItemId và gửi số lượng đích (quantity - 1) */}
-                            <button 
-                                onClick={() => updateQuantity(item.cartItemId, item.quantity - 1)} 
-                                className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
-                            >
+                            <button onClick={() => updateQuantity(item.cartItemId, item.quantity - 1)} className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">
                                 <Minus size={16} />
                             </button>
-                            
                             <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
-                            
-                            <button 
-                                onClick={() => updateQuantity(item.cartItemId, item.quantity + 1)} 
-                                className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
-                            >
+                            <button onClick={() => updateQuantity(item.cartItemId, item.quantity + 1)} className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">
                                 <Plus size={16} />
                             </button>
                         </div>
                     </div>
-                    {/* QUAN TRỌNG: Xoá bằng cartItemId */}
-                    <button 
-                        onClick={() => removeFromCart(item.cartItemId)} 
-                        className="text-red-400 hover:text-red-600 p-2"
-                    >
+                    <button onClick={() => removeFromCart(item.cartItemId)} className="text-red-400 hover:text-red-600 p-2">
                         <Trash2 size={20}/>
                     </button>
                 </div>
-            ))}
+                );
+            })}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN (Giữ nguyên) */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
