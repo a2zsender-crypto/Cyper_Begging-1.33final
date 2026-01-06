@@ -75,30 +75,33 @@ export default function Cart() {
           }
 
           // 3. GỌI EDGE FUNCTION
-          // CHUẨN BỊ ITEM: Ghép tên biến thể vào tên chính để gửi lên server
-          const orderItems = cart.map(i => {
-              // Logic tìm tên biến thể: Kiểm tra các key thường gặp trong cart object
-              // Nếu bạn lưu tên biến thể ở key khác (vd: i.selected_variant), hãy sửa lại dòng này
-              const variantLabel = i.variant_name || (i.variant ? i.variant.name : '') || i.selectedSize || '';
+          // --- SỬA ĐỔI QUAN TRỌNG: GHÉP TÊN BIẾN THỂ ---
+          const itemsPayload = cart.map(i => {
+              // Lấy tên gốc theo ngôn ngữ
+              let itemName = lang === 'vi' ? i.title : (i.title_en || i.title);
               
-              // Tạo tên đầy đủ: "Tên Gốc (Biến thể)"
-              // Nếu đã có tên biến thể thì ghép vào, nếu không thì giữ nguyên title
-              const fullDisplayName = variantLabel 
-                  ? `${i.title} (${variantLabel})` 
-                  : (i.name || i.title);
+              // Tìm thông tin biến thể (dựa trên các trường thường gặp trong object cart)
+              // Ưu tiên: variant_name -> selected_variant.name -> selected_variant -> options
+              const variantLabel = i.variant_name || 
+                                   (i.selected_variant?.name) || 
+                                   (typeof i.selected_variant === 'string' ? i.selected_variant : '') ||
+                                   '';
 
-              return { 
-                  id: i.id, 
+              // Nếu có biến thể, ghép vào tên (Ví dụ: Viettel Topup - 200,000 VND)
+              const fullName = variantLabel ? `${itemName} (${variantLabel})` : itemName;
+
+              return {
+                  id: i.id,
                   quantity: i.quantity,
-                  price: i.price,
-                  name: fullDisplayName, // Gửi tên ĐẦY ĐỦ này lên server
+                  price: i.price, // Giá đã chọn biến thể
+                  name: fullName, // GỬI TÊN ĐẦY ĐỦ (Đã kèm biến thể)
                   is_digital: i.is_digital
               };
           });
 
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  items: orderItems,
+                  items: itemsPayload,
                   email: formData.email,
                   name: formData.name,
                   contactMethod: formData.contactMethod,
@@ -152,6 +155,7 @@ export default function Cart() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
         {/* CỘT TRÁI: SẢN PHẨM */}
         <div className="lg:col-span-2 space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">{t('Giỏ hàng của bạn', 'Your Cart')}</h2>
@@ -160,9 +164,13 @@ export default function Cart() {
                     <img src={item.images?.[0] || item.image} className="w-20 h-20 object-cover rounded-lg border"/>
                     <div className="flex-1 text-center sm:text-left">
                         <h3 className="font-bold text-slate-800 line-clamp-1">
-                            {/* Hiển thị tên kèm biến thể ở đây nếu có */}
-                            {lang === 'vi' ? item.title : (item.title_en || item.title)} 
-                            {item.variant_name ? ` (${item.variant_name})` : ''}
+                             {/* Hiển thị tên + biến thể ở giao diện Cart */}
+                             {lang === 'vi' ? item.title : (item.title_en || item.title)}
+                             {(item.variant_name || item.selected_variant?.name) && 
+                                <span className="text-sm font-normal text-gray-500 block sm:inline sm:ml-2">
+                                    ({item.variant_name || item.selected_variant?.name || item.selected_variant})
+                                </span>
+                             }
                         </h3>
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
                         
@@ -181,7 +189,7 @@ export default function Cart() {
             ))}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN (Giữ nguyên) */}
+        {/* CỘT PHẢI: FORM THANH TOÁN */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
@@ -241,6 +249,7 @@ export default function Cart() {
                             )}
                         </>
                     )}
+                    
                     <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
@@ -273,6 +282,7 @@ export default function Cart() {
                 </div>
             </div>
 
+            {/* Tổng tiền & Nút Pay */}
             <div className="mt-8 pt-6 border-t">
                 <div className="flex justify-between items-center mb-6">
                     <span className="text-xl font-bold text-slate-800">{t('Tổng cộng:', 'Total:')}</span>
