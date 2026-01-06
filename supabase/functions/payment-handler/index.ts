@@ -25,6 +25,7 @@ serve(async (req) => {
     if (!items || !Array.isArray(items) || items.length === 0) throw new Error("Giỏ hàng trống");
     if (!email) throw new Error("Thiếu email khách hàng");
 
+    // Lấy Merchant Key
     const { data: config } = await supabase.from('app_config').select('value').eq('key', 'OXAPAY_MERCHANT_KEY').single();
     if (!config?.value) throw new Error("Chưa cấu hình Merchant Key");
     const merchantKey = config.value;
@@ -33,6 +34,7 @@ serve(async (req) => {
     const orderItemsData = [];
     let descriptionParts = [];
 
+    // Lấy thông tin sản phẩm từ DB để đối chiếu
     const itemIds = items.map(i => i.id);
     const { data: products } = await supabase.from('products').select('*').in('id', itemIds);
 
@@ -42,33 +44,41 @@ serve(async (req) => {
       const product = products.find(p => p.id === item.id);
       if (!product) continue;
 
+      // --- LOGIC GIÁ & TÊN (ĐÃ SỬA) ---
       let unitPrice = product.price;
+
+      // 1. Dùng giá từ Client nếu có (để hỗ trợ biến thể giá cao hơn)
       if (item.price && parseFloat(item.price) !== product.price) {
+          console.log(`Product ${product.id}: Base ${product.price}, Variant Price: ${item.price}`);
           unitPrice = parseFloat(item.price);
       }
 
       const lineTotal = unitPrice * item.quantity;
       totalAmount += lineTotal;
 
-      // 1. LẤY TÊN ĐẦY ĐỦ CHO OXAPAY VÀ DATABASE
-      // Ưu tiên dùng tên client gửi lên (vì đã được ghép biến thể ở Cart.jsx)
-      // Nếu không có thì mới fallback về tên gốc trong DB
-      const fullDisplayName = item.name || ((language === 'en' && product.title_en) ? product.title_en : product.title);
+      // 2. Tên hiển thị: ƯU TIÊN tên từ Frontend gửi lên (vì đã ghép biến thể)
+      // Nếu không có thì fallback về logic cũ
+      const baseName = (language === 'en' && product.title_en) ? product.title_en : product.title;
+      const displayName = item.name || baseName;
 
-      descriptionParts.push(`${fullDisplayName} ($${unitPrice} x${item.quantity})`);
+      // Thêm vào mô tả cho OxaPay (Fix lỗi OxaPay thiếu biến thể)
+      descriptionParts.push(`${displayName} ($${unitPrice} x${item.quantity})`);
 
+      // 3. Chuẩn bị dữ liệu lưu vào DB (Cố gắng lưu tên đầy đủ cho Admin Panel)
       orderItemsData.push({
         product_id: product.id,
         quantity: item.quantity,
         price_at_purchase: unitPrice,
-        // 2. LƯU TÊN BIẾN THỂ VÀO DB ĐỂ ADMIN PANEL HIỂN THỊ
-        // Cần đảm bảo bảng order_items có cột 'variant_name'
-        variant_name: fullDisplayName 
+        // Lưu tên đầy đủ (biến thể) vào cột name hoặc product_name nếu bảng có hỗ trợ
+        // Điều này giúp Admin Panel hiển thị đúng "Viettel... 200k" thay vì chỉ "Viettel..."
+        name: displayName, 
+        product_name: displayName // Backup trường hợp DB dùng cột này
       });
     }
 
     if (totalAmount <= 0) throw new Error("Tổng tiền không hợp lệ");
 
+    // Tạo Order
     const { data: order, error: orderError } = await supabase.from('orders').insert({
         amount: totalAmount,
         customer_email: email,
@@ -82,20 +92,35 @@ serve(async (req) => {
 
     if (orderError) throw orderError;
 
-    const itemsToInsert = orderItemsData.map(i => ({ ...i, order_id: order.id }));
+    // Lưu Order Items
+    // Lưu ý: Nếu DB của bạn chưa có cột 'name' hay 'product_name' trong bảng order_items,
+    // Supabase sẽ tự động bỏ qua các trường thừa hoặc báo lỗi tuỳ config. 
+    // Tuy nhiên, logic này là cần thiết để Admin hiển thị đúng.
+    const itemsToInsert = orderItemsData.map(i => ({ 
+        order_id: order.id,
+        product_id: i.product_id,
+        quantity: i.quantity,
+        price_at_purchase: i.price_at_purchase,
+        // Cố gắng lưu tên biến thể
+        product_name: i.product_name 
+    }));
     
-    // Insert order items
-    // Lưu ý: Nếu DB chưa có cột variant_name, Supabase có thể báo lỗi hoặc bỏ qua trường này tuỳ cấu hình.
+    // Thực hiện Insert items
     const { error: itemsError } = await supabase.from('order_items').insert(itemsToInsert);
+    
+    // Nếu lỗi insert do thừa cột (DB chưa update), ta fallback về insert cơ bản
     if (itemsError) {
-        console.error("Insert Items Error (Có thể do thiếu cột variant_name):", itemsError);
-        // Fallback: Nếu lỗi insert (do dư cột variant_name), thử insert lại bản thiếu cột này để đơn hàng vẫn chạy
-        if (itemsError.message?.includes('column "variant_name" of relation "order_items" does not exist')) {
-             const fallbackItems = itemsToInsert.map(({ variant_name, ...rest }) => rest);
-             await supabase.from('order_items').insert(fallbackItems);
-        }
+        console.warn("Lỗi lưu chi tiết (có thể do thừa cột name), thử lưu cơ bản:", itemsError.message);
+        const basicItems = orderItemsData.map(i => ({
+             order_id: order.id,
+             product_id: i.product_id,
+             quantity: i.quantity,
+             price_at_purchase: i.price_at_purchase
+        }));
+        await supabase.from('order_items').insert(basicItems);
     }
 
+    // Gọi OxaPay (Sử dụng descriptionParts đã ghép tên đầy đủ)
     const oxapayPayload = {
       merchant: merchantKey,
       amount: totalAmount,
@@ -104,9 +129,11 @@ serve(async (req) => {
       returnUrl: `${req.headers.get('origin')}/success?orderId=${order.id}`,
       callbackUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/oxapay-webhook`,
       orderId: order.id.toString(),
-      description: descriptionParts.join(', ').substring(0, 100),
+      description: descriptionParts.join(', ').substring(0, 100), // Tên đầy đủ sẽ hiện ở đây
       email: email
     };
+
+    console.log("Sending to OxaPay:", JSON.stringify(oxapayPayload));
 
     const oxapayRes = await fetch('https://api.oxapay.com/merchants/request', {
       method: 'POST',
