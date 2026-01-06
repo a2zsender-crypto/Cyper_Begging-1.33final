@@ -138,7 +138,7 @@ export default function Products() {
                           <span className={`px-2.5 py-1 text-[10px] font-bold rounded-lg text-white shadow-sm ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`}>
                              {stock > 0 
                                 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` 
-                                : (p.allow_external_key ? t('Tự động (API)', 'Auto (API)') : t('Hết hàng', 'Out of Stock'))
+                                : (p.allow_external_key ? t('Sẵn hàng', 'In Stock') : t('Hết hàng', 'Out of Stock'))
                              }
                           </span>
                           
