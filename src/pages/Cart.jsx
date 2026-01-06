@@ -46,7 +46,6 @@ export default function Cart() {
 
   // Xử lý thanh toán
   const handleCheckout = async () => {
-      // Validate Client Side
       if (!formData.name || !formData.email) return alert(t('Vui lòng điền Tên và Email', 'Please fill Name and Email'));
       if (hasPhysical && (!formData.phone || !formData.address)) return alert(t('Vui lòng điền địa chỉ giao hàng', 'Please fill shipping address'));
       
@@ -57,7 +56,7 @@ export default function Cart() {
       setLoading(true);
 
       try {
-          // 2. NẾU CHƯA ĐĂNG NHẬP VÀ CHỌN ĐĂNG KÝ -> TẠO TÀI KHOẢN
+          // Đăng ký nếu cần
           if (!user && isRegister) {
               const { error: authError } = await supabase.auth.signUp({
                   email: formData.email,
@@ -74,27 +73,20 @@ export default function Cart() {
               }
           }
 
-          // 3. GỌI EDGE FUNCTION
-          // --- SỬA ĐỔI QUAN TRỌNG: GHÉP TÊN BIẾN THỂ ---
+          // GHÉP TÊN BIẾN THỂ VÀ GỬI LÊN SERVER
           const itemsPayload = cart.map(i => {
-              // Lấy tên gốc theo ngôn ngữ
               let itemName = lang === 'vi' ? i.title : (i.title_en || i.title);
-              
-              // Tìm thông tin biến thể (dựa trên các trường thường gặp trong object cart)
-              // Ưu tiên: variant_name -> selected_variant.name -> selected_variant -> options
               const variantLabel = i.variant_name || 
                                    (i.selected_variant?.name) || 
                                    (typeof i.selected_variant === 'string' ? i.selected_variant : '') ||
                                    '';
-
-              // Nếu có biến thể, ghép vào tên (Ví dụ: Viettel Topup - 200,000 VND)
               const fullName = variantLabel ? `${itemName} (${variantLabel})` : itemName;
 
               return {
                   id: i.id,
                   quantity: i.quantity,
-                  price: i.price, // Giá đã chọn biến thể
-                  name: fullName, // GỬI TÊN ĐẦY ĐỦ (Đã kèm biến thể)
+                  price: i.price,
+                  name: fullName, 
                   is_digital: i.is_digital
               };
           });
@@ -112,14 +104,8 @@ export default function Cart() {
               }
           });
 
-          if (error) {
-            console.error("Function Error:", error);
-            throw error;
-          }
-          
-          if (data?.error) {
-            throw new Error(data.error);
-          }
+          if (error) { console.error("Function Error:", error); throw error; }
+          if (data?.error) throw new Error(data.error);
 
           if (data?.payUrl) {
               clearCart(); 
@@ -135,7 +121,6 @@ export default function Cart() {
       }
   };
 
-  // UI khi giỏ hàng trống
   if (cart.length === 0) return (
       <div className="container mx-auto px-4 py-16 text-center">
           <div className="flex justify-center mb-6">
@@ -143,10 +128,7 @@ export default function Cart() {
           </div>
           <h2 className="text-2xl font-bold mb-4">{t('Giỏ hàng trống', 'Your cart is empty')}</h2>
           <p className="text-gray-600 mb-8">{t('Hãy quay lại cửa hàng để mua sắm.', 'Go back to shop and add some items.')}</p>
-          <Link 
-            to="/products" 
-            className="inline-flex items-center bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-          >
+          <Link to="/products" className="inline-flex items-center bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
             <ArrowLeft size={20} className="mr-2" />
             {t('Tiếp tục mua sắm', 'Continue Shopping')}
           </Link>
@@ -155,16 +137,14 @@ export default function Cart() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
         {/* CỘT TRÁI: SẢN PHẨM */}
         <div className="lg:col-span-2 space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">{t('Giỏ hàng của bạn', 'Your Cart')}</h2>
             {cart.map(item => (
-                <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 items-center">
+                <div key={item.cartItemId || item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 items-center">
                     <img src={item.images?.[0] || item.image} className="w-20 h-20 object-cover rounded-lg border"/>
                     <div className="flex-1 text-center sm:text-left">
                         <h3 className="font-bold text-slate-800 line-clamp-1">
-                             {/* Hiển thị tên + biến thể ở giao diện Cart */}
                              {lang === 'vi' ? item.title : (item.title_en || item.title)}
                              {(item.variant_name || item.selected_variant?.name) && 
                                 <span className="text-sm font-normal text-gray-500 block sm:inline sm:ml-2">
@@ -175,21 +155,36 @@ export default function Cart() {
                         <p className="text-green-600 font-bold">{item.price} USDT</p>
                         
                         <div className="flex items-center justify-center sm:justify-start gap-3 mt-2">
-                            <button onClick={()=>updateQuantity(item.id, item.quantity - 1)} className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">
+                            {/* QUAN TRỌNG: Sử dụng item.cartItemId và gửi số lượng đích (quantity - 1) */}
+                            <button 
+                                onClick={() => updateQuantity(item.cartItemId, item.quantity - 1)} 
+                                className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
+                            >
                                 <Minus size={16} />
                             </button>
+                            
                             <span className="text-sm font-bold min-w-[20px] text-center">{item.quantity}</span>
-                            <button onClick={()=>updateQuantity(item.id, item.quantity + 1)} className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold">
+                            
+                            <button 
+                                onClick={() => updateQuantity(item.cartItemId, item.quantity + 1)} 
+                                className="w-8 h-8 bg-slate-100 rounded text-slate-600 hover:bg-slate-200 flex items-center justify-center font-bold"
+                            >
                                 <Plus size={16} />
                             </button>
                         </div>
                     </div>
-                    <button onClick={()=>removeFromCart(item.id)} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={20}/></button>
+                    {/* QUAN TRỌNG: Xoá bằng cartItemId */}
+                    <button 
+                        onClick={() => removeFromCart(item.cartItemId)} 
+                        className="text-red-400 hover:text-red-600 p-2"
+                    >
+                        <Trash2 size={20}/>
+                    </button>
                 </div>
             ))}
         </div>
 
-        {/* CỘT PHẢI: FORM THANH TOÁN */}
+        {/* CỘT PHẢI: FORM THANH TOÁN (Giữ nguyên) */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 h-fit sticky top-24">
             <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-2">{t('Thông tin thanh toán', 'Billing Details')}</h3>
             
@@ -249,8 +244,6 @@ export default function Cart() {
                             )}
                         </>
                     )}
-                    
-                    <p className="text-[10px] text-red-500 mt-2 italic">* {t('Sản phẩm sẽ được gửi qua email này.', 'Products will be sent to this email.')}</p>
                 </div>
 
                 {hasPhysical && (
@@ -282,7 +275,6 @@ export default function Cart() {
                 </div>
             </div>
 
-            {/* Tổng tiền & Nút Pay */}
             <div className="mt-8 pt-6 border-t">
                 <div className="flex justify-between items-center mb-6">
                     <span className="text-xl font-bold text-slate-800">{t('Tổng cộng:', 'Total:')}</span>
@@ -293,21 +285,11 @@ export default function Cart() {
                     onClick={handleCheckout} 
                     disabled={loading}
                     className={`w-full py-4 rounded-xl font-bold text-lg text-white transition shadow-lg flex justify-center items-center gap-2
-                        ${loading 
-                            ? 'bg-gray-400 cursor-not-allowed' 
-                            : 'bg-green-600 hover:bg-green-700 shadow-green-200'
-                        }`}
+                        ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 shadow-green-200'}`}
                 >
-                    {loading ? (
-                        <span className="animate-pulse">{t('Đang xử lý...', 'Processing...')}</span>
-                    ) : (
-                        <><CreditCard size={24}/> {t('THANH TOÁN NGAY', 'PAY NOW')}</>
-                    )}
+                    {loading ? <span className="animate-pulse">{t('Đang xử lý...', 'Processing...')}</span> : <><CreditCard size={24}/> {t('THANH TOÁN NGAY', 'PAY NOW')}</>}
                 </button>
-                
-                <p className="text-center text-xs text-slate-400 mt-4 flex items-center justify-center gap-1">
-                    <Send size={12}/> {t('Hỗ trợ 24/7 qua Telegram', '24/7 Support via Telegram')}
-                </p>
+                <p className="text-center text-xs text-slate-400 mt-4 flex items-center justify-center gap-1"><Send size={12}/> {t('Hỗ trợ 24/7 qua Telegram', '24/7 Support via Telegram')}</p>
             </div>
         </div>
     </div>
