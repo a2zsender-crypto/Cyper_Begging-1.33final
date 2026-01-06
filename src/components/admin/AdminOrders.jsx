@@ -5,11 +5,13 @@ import {
   Clock, CheckCircle, XCircle, AlertTriangle, Package, Calendar 
 } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { useLang } from '../../context/LangContext'; // Import context ngôn ngữ
 
 const AdminOrders = () => {
+  const { t, lang } = useLang(); // Sử dụng hook ngôn ngữ
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState(null); // State cho Modal chi tiết
+  const [selectedOrder, setSelectedOrder] = useState(null); 
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
@@ -17,7 +19,7 @@ const AdminOrders = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, filterStatus]); // Reload khi đổi trang hoặc filter
+  }, [page, filterStatus]); 
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -43,7 +45,6 @@ const AdminOrders = () => {
         query = query.eq('status', filterStatus);
       }
 
-      // Lưu ý: Search text trên Supabase cần cấu hình thêm, ở đây xử lý cơ bản
       if (searchTerm) {
         query = query.or(`customer_email.ilike.%${searchTerm}%,oxapay_track_id.ilike.%${searchTerm}%`);
       }
@@ -54,18 +55,28 @@ const AdminOrders = () => {
       setOrders(data || []);
     } catch (error) {
       console.error('Error fetching orders:', error);
-      toast.error('Không thể tải danh sách đơn hàng');
+      toast.error(t('Không thể tải danh sách đơn hàng', 'Failed to fetch orders'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Helper: Format tiền tệ
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
   };
 
-  // Helper: Status Badge
+  // Helper: Format ngày tháng theo ngôn ngữ
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US');
+  };
+
+  const formatTime = (dateString) => {
+    if (!dateString) return '';
+    return new Date(dateString).toLocaleTimeString(lang === 'vi' ? 'vi-VN' : 'en-US');
+  };
+
+  // Helper: Status Badge (Đa ngôn ngữ)
   const getStatusBadge = (status) => {
     const styles = {
       pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -83,12 +94,29 @@ const AdminOrders = () => {
       failed: <XCircle size={14} />,
     };
 
+    const labels = {
+      pending: t('Chờ xử lý', 'Pending'),
+      paid: t('Đã thanh toán', 'Paid'),
+      completed: t('Hoàn thành', 'Completed'),
+      expired: t('Hết hạn', 'Expired'),
+      failed: t('Thất bại', 'Failed'),
+    };
+
     return (
       <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.expired}`}>
         {icons[status] || <Clock size={14} />}
-        <span className="capitalize">{status}</span>
+        <span className="capitalize">{labels[status] || status}</span>
       </span>
     );
+  };
+
+  // Labels cho bộ lọc
+  const filterLabels = {
+      all: t('Tất cả', 'All'),
+      pending: t('Chờ xử lý', 'Pending'),
+      paid: t('Đã thanh toán', 'Paid'),
+      completed: t('Hoàn thành', 'Completed'),
+      expired: t('Hết hạn', 'Expired'),
   };
 
   return (
@@ -96,7 +124,7 @@ const AdminOrders = () => {
       {/* HEADER & FILTER */}
       <div className="p-6 border-b border-slate-100">
         <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Quản lý Đơn hàng</h2>
+          <h2 className="text-xl font-bold text-slate-800">{t('Quản lý Đơn hàng', 'Order Management')}</h2>
           <div className="flex gap-2">
             <button onClick={fetchOrders} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
               <Clock size={20} />
@@ -109,7 +137,7 @@ const AdminOrders = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
               type="text" 
-              placeholder="Tìm theo email, Order ID..." 
+              placeholder={t('Tìm theo email, Order ID...', 'Search by email, Order ID...')} 
               className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -126,7 +154,7 @@ const AdminOrders = () => {
                     ? 'bg-blue-600 text-white border-blue-600' 
                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               >
-                {status.charAt(0).toUpperCase() + status.slice(1)}
+                {filterLabels[status]}
               </button>
             ))}
           </div>
@@ -138,12 +166,12 @@ const AdminOrders = () => {
         <table className="w-full">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">Order ID</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">Khách hàng</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">Tổng tiền</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">Trạng thái</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">Ngày tạo</th>
-              <th className="px-6 py-4 text-right text-xs font-semibold text-slate-600 uppercase">Hành động</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Mã đơn', 'Order ID')}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Khách hàng', 'Customer')}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Tổng tiền', 'Total Amount')}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Trạng thái', 'Status')}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Ngày tạo', 'Created At')}</th>
+              <th className="px-6 py-4 text-right text-xs font-semibold text-slate-600 uppercase">{t('Hành động', 'Actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -158,7 +186,7 @@ const AdminOrders = () => {
             ) : orders.length === 0 ? (
               <tr>
                 <td colSpan="6" className="px-6 py-12 text-center text-slate-500">
-                  Không tìm thấy đơn hàng nào.
+                  {t('Không tìm thấy đơn hàng nào.', 'No orders found.')}
                 </td>
               </tr>
             ) : (
@@ -179,14 +207,14 @@ const AdminOrders = () => {
                     {getStatusBadge(order.status)}
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-600">
-                    {new Date(order.created_at).toLocaleDateString('vi-VN')}
-                    <div className="text-xs text-slate-400">{new Date(order.created_at).toLocaleTimeString('vi-VN')}</div>
+                    {formatDate(order.created_at)}
+                    <div className="text-xs text-slate-400">{formatTime(order.created_at)}</div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button 
                       onClick={() => setSelectedOrder(order)}
                       className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Xem chi tiết"
+                      title={t('Xem chi tiết', 'View Details')}
                     >
                       <Eye size={18} />
                     </button>
@@ -208,7 +236,7 @@ const AdminOrders = () => {
           <ChevronLeft size={20} />
         </button>
         <span className="px-4 py-2 bg-slate-50 rounded-lg text-sm font-medium flex items-center">
-          Trang {page}
+          {t('Trang', 'Page')} {page}
         </span>
         <button 
           onClick={() => setPage(p => p + 1)}
@@ -219,7 +247,7 @@ const AdminOrders = () => {
         </button>
       </div>
 
-      {/* MODAL CHI TIẾT ĐƠN HÀNG (SỬA LỖI HIỂN THỊ BIẾN THỂ TẠI ĐÂY) */}
+      {/* MODAL CHI TIẾT ĐƠN HÀNG */}
       {selectedOrder && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-fade-in-up">
@@ -227,9 +255,11 @@ const AdminOrders = () => {
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">Chi tiết đơn hàng #{selectedOrder.id}</h3>
+                <h3 className="text-xl font-bold text-slate-800">
+                    {t('Chi tiết đơn hàng', 'Order Details')} #{selectedOrder.id}
+                </h3>
                 <p className="text-sm text-slate-500 mt-1">
-                  Ngày tạo: {new Date(selectedOrder.created_at).toLocaleString('vi-VN')}
+                  {t('Ngày tạo:', 'Created Date:')} {new Date(selectedOrder.created_at).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US')}
                 </p>
               </div>
               <button 
@@ -247,49 +277,45 @@ const AdminOrders = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                   <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
-                    <Filter size={16}/> Thông tin khách hàng
+                    <Filter size={16}/> {t('Thông tin khách hàng', 'Customer Info')}
                   </h4>
                   <div className="space-y-2 text-sm">
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">Họ tên:</span> {selectedOrder.customer_name}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">Email:</span> {selectedOrder.customer_email}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">Liên hệ:</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">Địa chỉ:</span> {selectedOrder.shipping_address || 'N/A'}</p>
+                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name}</p>
+                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Email:', 'Email:')}</span> {selectedOrder.customer_email}</p>
+                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
+                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Địa chỉ:', 'Address:')}</span> {selectedOrder.shipping_address || 'N/A'}</p>
                   </div>
                 </div>
 
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                   <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-                    <Package size={16}/> Thông tin thanh toán
+                    <Package size={16}/> {t('Thông tin thanh toán', 'Payment Info')}
                   </h4>
                   <div className="space-y-2 text-sm">
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">Trạng thái:</span> {getStatusBadge(selectedOrder.status)}</p>
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">Tổng tiền:</span> <span className="font-bold text-green-600 text-lg">{formatCurrency(selectedOrder.amount)}</span></p>
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">Track ID:</span> <span className="font-mono bg-slate-200 px-2 py-0.5 rounded text-xs">{selectedOrder.oxapay_track_id || 'Chưa có'}</span></p>
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">Phương thức:</span> Crypto (OxaPay)</p>
+                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Trạng thái:', 'Status:')}</span> {getStatusBadge(selectedOrder.status)}</p>
+                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Tổng tiền:', 'Total:')}</span> <span className="font-bold text-green-600 text-lg">{formatCurrency(selectedOrder.amount)}</span></p>
+                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Track ID:', 'Track ID:')}</span> <span className="font-mono bg-slate-200 px-2 py-0.5 rounded text-xs">{selectedOrder.oxapay_track_id || t('Chưa có', 'None')}</span></p>
+                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Phương thức:', 'Method:')}</span> Crypto (OxaPay)</p>
                   </div>
                 </div>
               </div>
 
               {/* Danh sách sản phẩm */}
               <div>
-                <h4 className="font-bold text-slate-800 mb-4 border-l-4 border-blue-600 pl-3">Sản phẩm đã mua</h4>
+                <h4 className="font-bold text-slate-800 mb-4 border-l-4 border-blue-600 pl-3">{t('Sản phẩm đã mua', 'Purchased Items')}</h4>
                 <div className="border rounded-xl overflow-hidden shadow-sm">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b">
                       <tr>
-                        <th className="px-4 py-3 text-left font-semibold text-slate-600">Sản phẩm</th>
-                        <th className="px-4 py-3 text-center font-semibold text-slate-600">SL</th>
-                        <th className="px-4 py-3 text-right font-semibold text-slate-600">Đơn giá</th>
-                        <th className="px-4 py-3 text-right font-semibold text-slate-600">Thành tiền</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-600">{t('Sản phẩm', 'Product')}</th>
+                        <th className="px-4 py-3 text-center font-semibold text-slate-600">{t('SL', 'Qty')}</th>
+                        <th className="px-4 py-3 text-right font-semibold text-slate-600">{t('Đơn giá', 'Unit Price')}</th>
+                        <th className="px-4 py-3 text-right font-semibold text-slate-600">{t('Thành tiền', 'Total')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {selectedOrder.order_items?.map((item, idx) => {
-                        // --- LOGIC HIỂN THỊ TÊN SẢN PHẨM + BIẾN THỂ ---
-                        // Ưu tiên 1: item.product_name (Tên đầy đủ lưu lúc mua)
-                        // Ưu tiên 2: item.name (Cột dự phòng)
-                        // Ưu tiên 3: item.products.title (Tên gốc trong kho - fallback)
-                        
+                        // Logic hiển thị tên sản phẩm + biến thể
                         const displayName = item.product_name || item.name || item.products?.title || 'Unknown Product';
                         const originalName = item.products?.title;
                         const isVariant = displayName !== originalName;
@@ -305,9 +331,8 @@ const AdminOrders = () => {
                                   <div className="font-medium text-slate-900">
                                     {displayName}
                                   </div>
-                                  {/* Nếu tên hiển thị khác tên gốc (tức là có biến thể), ta có thể hiển thị thêm tên gốc mờ mờ để đối chiếu nếu cần */}
                                   {isVariant && originalName && (
-                                    <div className="text-xs text-slate-400">Gốc: {originalName}</div>
+                                    <div className="text-xs text-slate-400">{t('Gốc:', 'Original:')} {originalName}</div>
                                   )}
                                 </div>
                               </div>
@@ -325,10 +350,10 @@ const AdminOrders = () => {
                 </div>
               </div>
 
-              {/* Ghi chú hệ thống (Nếu có) */}
+              {/* Ghi chú hệ thống */}
               {selectedOrder.notes && (
                 <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 text-sm text-yellow-800">
-                  <span className="font-bold block mb-1">Ghi chú hệ thống:</span>
+                  <span className="font-bold block mb-1">{t('Ghi chú hệ thống:', 'System Notes:')}</span>
                   {selectedOrder.notes}
                 </div>
               )}
