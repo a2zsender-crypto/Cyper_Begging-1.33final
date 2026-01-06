@@ -19,13 +19,36 @@ export default function AdminProducts() {
     }
   });
 
+  // --- SỬA ĐỔI QUAN TRỌNG: LOGIC ĐẾM STOCK CHUẨN XÁC ---
   const { data: stockCounts = {} } = useQuery({
     queryKey: ['admin-stock'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('products').select('id, physical_stock');
-      if (error) throw error;
+      // 1. Lấy thông tin cơ bản của tất cả sản phẩm
+      const { data: allProds, error: prodError } = await supabase.from('products').select('id, physical_stock, is_digital');
+      if (prodError) throw prodError;
+
+      // 2. Lấy toàn bộ KEY chưa sử dụng từ bảng product_keys để đếm thực tế
+      const { data: allKeys, error: keyError } = await supabase
+        .from('product_keys')
+        .select('product_id')
+        .eq('is_used', false);
+      
+      if (keyError) throw keyError;
+
       const map = {}; 
-      data?.forEach(p => map[p.id] = p.physical_stock);
+      
+      // 3. Tính toán lại kho
+      allProds?.forEach(p => {
+          if (p.is_digital) {
+              // Nếu là Digital: Đếm số lượng key thực tế trong bảng keys
+              // (Khắc phục lỗi lệch tồn kho khi sửa DB thủ công)
+              const realCount = allKeys.filter(k => k.product_id === p.id).length;
+              map[p.id] = realCount;
+          } else {
+              // Nếu là Vật lý: Sử dụng số lượng đã nhập trong bảng products
+              map[p.id] = p.physical_stock || 0;
+          }
+      });
       return map;
     }
   });
@@ -151,10 +174,15 @@ export default function AdminProducts() {
       setShowProductModal(true);
   };
   const openEditModal = (p) => {
+      // Khi mở modal, nếu là SP số, ta có thể dùng số lượng thực tế đã tính toán được
+      // để hiển thị đúng trong form, tránh save đè số cũ.
+      const realStock = p.is_digital ? (stockCounts[p.id] || 0) : (p.physical_stock || 0);
+
       setProductForm({
         id: p.id, title: p.title, title_en: p.title_en || '', price: p.price,
         description: p.description || '', description_en: p.description_en || '',
-        is_digital: p.is_digital, physical_stock: p.physical_stock || 0, 
+        is_digital: p.is_digital, 
+        physical_stock: realStock, // Sử dụng số thực tế
         images: p.images || [], variants: p.variants || [],
         variant_stocks: p.variant_stocks || [], allow_external_key: p.allow_external_key || false
       });
@@ -192,7 +220,7 @@ export default function AdminProducts() {
       } catch (err) { toast.error(err.message); }
   };
 
-  // --- LOGIC NHẬP KHO (UPDATED: Thêm tên SP vào Key Variant Info) ---
+  // --- LOGIC NHẬP KHO ---
   const handleImportStock = async () => {
     try {
         if (!showKeyModal?.product) return;
@@ -206,31 +234,27 @@ export default function AdminProducts() {
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
             
-            // Xử lý variant info: Thêm Tên Sản Phẩm vào để dễ quản lý trong DB
             let variantInfo = showKeyModal.variant ? { ...showKeyModal.variant } : {}; 
-            
-            // Tự động thêm tên sản phẩm và tên đầy đủ (Title + Variant) vào variant_info
-            // Dùng dấu _ ở trước key để đánh dấu là dữ liệu nội bộ (system/admin view)
             const variantStr = showKeyModal.variant ? Object.values(showKeyModal.variant).join(' ') : '';
             const fullTitle = `${currentProd.title} ${variantStr}`.trim();
             
             variantInfo = {
                 ...variantInfo,
-                _product_name: currentProd.title, // Key ẩn để quản lý
-                _full_title: fullTitle            // Key ẩn để quản lý
+                _product_name: currentProd.title,
+                _full_title: fullTitle
             };
 
             const insertData = codes.map(code => ({ 
                 product_id: currentProd.id, 
                 key_value: code.trim(),
-                variant_info: variantInfo, // Lưu thông tin đã bổ sung
+                variant_info: variantInfo, 
                 is_used: false 
             }));
 
             const { error } = await supabase.from('product_keys').insert(insertData);
             if (error) throw error;
 
-            // 2. Tính toán Stock mới
+            // 2. Cập nhật cache stock trong bảng products (để đồng bộ)
             const countToAdd = insertData.length;
             const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
             
@@ -254,6 +278,7 @@ export default function AdminProducts() {
             toast.success(t(`Đã thêm ${countToAdd} Keys!`, `Added ${countToAdd} Keys!`));
 
         } else {
+            // Nhập kho Vật lý
             const qtyToAdd = parseInt(stockInput);
             if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn("Số lượng > 0");
             
@@ -264,6 +289,7 @@ export default function AdminProducts() {
             toast.success("Đã cập nhật kho!");
         }
         
+        // Update form state if matching
         if (productForm.id === currentProd.id) {
             setProductForm(prev => ({
                 ...prev,
@@ -274,7 +300,7 @@ export default function AdminProducts() {
 
         setKeyInput(''); setStockInput(0); setShowKeyModal(null);
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
-        queryClient.invalidateQueries({ queryKey: ['admin-stock'] });
+        queryClient.invalidateQueries({ queryKey: ['admin-stock'] }); // Trigger fetch lại số đúng
 
     } catch (err) { toast.error("Lỗi: " + err.message); }
   };
@@ -351,6 +377,7 @@ export default function AdminProducts() {
                      </div>
                  )}
                  
+                 {/* VARIANTS SECTION */}
                  <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                     <div className="flex justify-between items-center mb-3">
                         <label className="block text-sm font-bold text-slate-700 flex items-center gap-2"><Settings size={16}/> Product Options (Variants)</label>
