@@ -50,7 +50,6 @@ export default function AdminProducts() {
 
   // --- LOGIC TẠO MA TRẬN BIẾN THỂ ---
   useEffect(() => {
-    // Chỉ chạy logic tạo combo nếu có variants
     if (!productForm.variants || productForm.variants.length === 0) {
         return;
     }
@@ -72,33 +71,25 @@ export default function AdminProducts() {
 
     const combos = generateCombinations(validVariants);
     
-    // Merge với dữ liệu cũ để giữ stock
+    // Merge với dữ liệu cũ
     const mergedStocks = combos.map(combo => {
         const existing = productForm.variant_stocks?.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
         return existing || { options: combo, stock: 0 };
     });
 
-    // Cập nhật state
-    // LƯU Ý: Với Digital, stock được tính từ key, không nên tự động reset về 0 ở đây nếu user đang thao tác.
-    // Ta chỉ update cấu trúc variants.
     const totalVariantStock = mergedStocks.reduce((sum, item) => sum + (parseInt(item.stock) || 0), 0);
     
     setProductForm(prev => {
-        // Kiểm tra xem có thay đổi thực sự không để tránh render loop
         const isSame = JSON.stringify(prev.variant_stocks?.map(x=>x.options)) === JSON.stringify(mergedStocks.map(x=>x.options));
         if(isSame) {
-             // Nếu cấu trúc giống nhau, chỉ update physical_stock nếu là hàng vật lý (auto sum)
              if (!productForm.is_digital && prev.physical_stock !== totalVariantStock) {
                  return { ...prev, physical_stock: totalVariantStock };
              }
              return prev;
         }
-        
-        // Nếu cấu trúc khác nhau (thêm/bớt variant), cập nhật lại list
         return { 
             ...prev, 
             variant_stocks: mergedStocks,
-            // Nếu vật lý -> Auto sum stock. Nếu Digital -> Giữ nguyên (vì stock do key quyết định)
             physical_stock: productForm.is_digital ? prev.physical_stock : totalVariantStock 
         };
     });
@@ -106,7 +97,6 @@ export default function AdminProducts() {
   }, [productForm.variants, productForm.is_digital]);
 
   const handleVariantStockChange = (idx, value) => {
-      // Chỉ cho phép sửa tay với hàng Vật lý
       if(productForm.is_digital) return; 
       const newStocks = [...productForm.variant_stocks];
       newStocks[idx].stock = parseInt(value) || 0;
@@ -174,8 +164,6 @@ export default function AdminProducts() {
   const handleSaveProduct = async (e) => {
       e.preventDefault();
       
-      // FIX LỖI RESET STOCK: Không được set về 0 nếu là digital.
-      // Dùng giá trị hiện tại trong form (được load từ DB hoặc cập nhật sau khi add key)
       const safeStock = parseInt(productForm.physical_stock) || 0;
       
       const productData = {
@@ -183,7 +171,7 @@ export default function AdminProducts() {
           price: parseFloat(productForm.price) || 0,
           description: productForm.description, description_en: productForm.description_en,
           images: productForm.images, is_digital: productForm.is_digital,
-          physical_stock: safeStock, // Sử dụng giá trị safeStock đã sửa
+          physical_stock: safeStock,
           variants: productForm.variants,
           variant_stocks: productForm.variant_stocks, 
           allow_external_key: productForm.allow_external_key
@@ -204,7 +192,7 @@ export default function AdminProducts() {
       } catch (err) { toast.error(err.message); }
   };
 
-  // --- LOGIC NHẬP KHO VÀ CẬP NHẬT UI ---
+  // --- LOGIC NHẬP KHO (UPDATED: Thêm tên SP vào Key Variant Info) ---
   const handleImportStock = async () => {
     try {
         if (!showKeyModal?.product) return;
@@ -217,12 +205,25 @@ export default function AdminProducts() {
             // 1. Nhập Key Digital
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
-            const variantInfo = showKeyModal.variant ? showKeyModal.variant : {}; 
             
+            // Xử lý variant info: Thêm Tên Sản Phẩm vào để dễ quản lý trong DB
+            let variantInfo = showKeyModal.variant ? { ...showKeyModal.variant } : {}; 
+            
+            // Tự động thêm tên sản phẩm và tên đầy đủ (Title + Variant) vào variant_info
+            // Dùng dấu _ ở trước key để đánh dấu là dữ liệu nội bộ (system/admin view)
+            const variantStr = showKeyModal.variant ? Object.values(showKeyModal.variant).join(' ') : '';
+            const fullTitle = `${currentProd.title} ${variantStr}`.trim();
+            
+            variantInfo = {
+                ...variantInfo,
+                _product_name: currentProd.title, // Key ẩn để quản lý
+                _full_title: fullTitle            // Key ẩn để quản lý
+            };
+
             const insertData = codes.map(code => ({ 
                 product_id: currentProd.id, 
                 key_value: code.trim(),
-                variant_info: variantInfo, 
+                variant_info: variantInfo, // Lưu thông tin đã bổ sung
                 is_used: false 
             }));
 
@@ -231,15 +232,12 @@ export default function AdminProducts() {
 
             // 2. Tính toán Stock mới
             const countToAdd = insertData.length;
-            
-            // Lấy dữ liệu mới nhất từ DB
             const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
             
             updatedPhysicalStock = (latestProd.physical_stock || 0) + countToAdd;
             updatedVariantStocks = latestProd.variant_stocks || [];
 
             if (showKeyModal.variant) {
-                // Update cho variant cụ thể
                 const vIndex = updatedVariantStocks.findIndex(v => JSON.stringify(v.options) === JSON.stringify(showKeyModal.variant));
                 if (vIndex >= 0) {
                     updatedVariantStocks[vIndex].stock = (parseInt(updatedVariantStocks[vIndex].stock) || 0) + countToAdd;
@@ -248,7 +246,6 @@ export default function AdminProducts() {
                 }
             }
 
-            // Update DB
             await supabase.from('products').update({
                 physical_stock: updatedPhysicalStock,
                 variant_stocks: updatedVariantStocks
@@ -257,19 +254,16 @@ export default function AdminProducts() {
             toast.success(t(`Đã thêm ${countToAdd} Keys!`, `Added ${countToAdd} Keys!`));
 
         } else {
-            // Nhập kho Vật lý
             const qtyToAdd = parseInt(stockInput);
             if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn("Số lượng > 0");
             
             const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
             updatedPhysicalStock = (latestProd.physical_stock || 0) + qtyToAdd;
-            // Với vật lý, variant stock update ở UI khác, ở đây chỉ update tổng nếu cần (hoặc disable nút này)
             
             await supabase.from('products').update({ physical_stock: updatedPhysicalStock }).eq('id', currentProd.id);
             toast.success("Đã cập nhật kho!");
         }
         
-        // 3. QUAN TRỌNG: CẬP NHẬT LẠI STATE CỦA FORM ĐANG MỞ (Nếu đang edit đúng sản phẩm này)
         if (productForm.id === currentProd.id) {
             setProductForm(prev => ({
                 ...prev,
@@ -312,7 +306,6 @@ export default function AdminProducts() {
                  <td className="p-4"><span className={`px-2 py-1 rounded-md text-xs font-bold ${stockCounts[p.id]>0?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{stockCounts[p.id]||0}</span></td>
                  <td className="p-4 flex gap-2">
                     <button onClick={()=>openEditModal(p)} className="p-2 bg-slate-100 rounded hover:bg-blue-100 text-blue-600 transition"><Edit size={16}/></button>
-                    {/* Chỉ hiện nút add nhanh nếu không có variant để tránh nhập sai */}
                     {!p.variants?.length && (
                         <button onClick={()=>setShowKeyModal({product: p, variant: null})} className="p-2 bg-slate-100 rounded hover:bg-green-100 text-green-600 transition"><Plus size={16}/></button>
                     )}
@@ -358,7 +351,6 @@ export default function AdminProducts() {
                      </div>
                  )}
                  
-                 {/* VARIANTS SECTION */}
                  <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                     <div className="flex justify-between items-center mb-3">
                         <label className="block text-sm font-bold text-slate-700 flex items-center gap-2"><Settings size={16}/> Product Options (Variants)</label>
@@ -397,7 +389,6 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* MANAGE KEYS - CÓ BIẾN THỂ */}
                     {productForm.is_digital && productForm.variant_stocks.length > 0 && (
                         <div className="mt-6 border-t pt-4">
                              <label className="block text-sm font-bold text-slate-700 mb-2">Manage Keys per Variant</label>
@@ -423,7 +414,6 @@ export default function AdminProducts() {
                     )}
                  </div>
 
-                 {/* SỬA: KHU VỰC ADD KEY CHO SẢN PHẨM KHÔNG BIẾN THỂ */}
                  {productForm.is_digital && (!productForm.variants || productForm.variants.length === 0) && (
                      <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex justify-between items-center">
                          <div>
@@ -439,7 +429,6 @@ export default function AdminProducts() {
                      </div>
                  )}
 
-                 {/* PHYSICAL STOCK READONLY */}
                  {!productForm.is_digital && (
                      <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
                          <label className="block text-sm font-bold text-orange-800 mb-1">Physical Stock (Total)</label>

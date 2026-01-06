@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useQuery } from '@tanstack/react-query'; 
 
-// Helper Mask Key (Ẩn bớt ký tự để bảo mật)
 const maskKey = (key) => {
     if (!key || key.length < 8) return '****';
     return key.substring(0, 2) + '****' + key.substring(key.length - 4);
@@ -21,16 +20,13 @@ export default function AdminOrders({ session, role }) {
   const [orderFilter, setOrderFilter] = useState('all');
   const [showOrderDetail, setShowOrderDetail] = useState(null);
 
-  // FETCH ORDERS BẰNG REACT QUERY
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ['admin-orders', role, session?.user?.email], 
     queryFn: async () => {
         let qOrders = supabase.from('orders').select('*, order_items(*, products(title, title_en, images, price))').order('id', {ascending: false});
-        
         if (role === 'user' && session?.user?.email) {
             qOrders = qOrders.eq('customer_email', session.user.email);
         }
-        
         const { data, error } = await qOrders;
         if (error) throw error;
         return data;
@@ -38,7 +34,6 @@ export default function AdminOrders({ session, role }) {
     enabled: !!session 
   });
 
-  // --- HELPERS ---
   const checkExpired = (createdAt) => {
       if (!createdAt) return false;
       const created = new Date(createdAt);
@@ -48,11 +43,9 @@ export default function AdminOrders({ session, role }) {
 
   const filteredOrders = useMemo(() => {
       if (!Array.isArray(orders)) return [];
-      
       return orders.filter(o => {
           const isExpired = checkExpired(o.created_at);
           if (role === 'user') return true; 
-          
           if (orderFilter === 'all') return true;
           if (orderFilter === 'paid') return o.status === 'paid';
           if (orderFilter === 'pending') return (o.status === 'pending' && !isExpired);
@@ -78,12 +71,17 @@ export default function AdminOrders({ session, role }) {
       navigate('/cart');
   };
 
-  // Helper render variants string
+  // Helper render variants string (Ẩn các trường system bắt đầu bằng _)
   const renderVariants = (variantsObj) => {
       if (!variantsObj || Object.keys(variantsObj).length === 0) return null;
+      // Filter out keys starting with underscore (_)
+      const entries = Object.entries(variantsObj).filter(([key]) => !key.startsWith('_'));
+      
+      if (entries.length === 0) return null;
+
       return (
           <div className="flex flex-wrap gap-1 mt-1">
-              {Object.entries(variantsObj).map(([key, val]) => (
+              {entries.map(([key, val]) => (
                   <span key={key} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
                       {key}: {val}
                   </span>
@@ -147,7 +145,6 @@ export default function AdminOrders({ session, role }) {
           </table>
        </div>
 
-       {/* MODAL ORDER DETAIL */}
        {showOrderDetail && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-scale-in">
@@ -186,7 +183,6 @@ export default function AdminOrders({ session, role }) {
                                     <div className="font-mono font-bold text-green-600 text-base">{item.price_at_purchase} USDT</div>
                                 </div>
                                 
-                                {/* HIỂN THỊ KEY VỚI LOGIC BẢO MẬT (MASK) */}
                                 {item.assigned_key && (
                                     <div className="mt-3 bg-slate-100 p-3 rounded-lg text-xs font-mono text-slate-600 border border-slate-200">
                                         <p className="font-bold text-slate-500 mb-1 uppercase tracking-wider text-[10px]">Assigned Key(s):</p>
