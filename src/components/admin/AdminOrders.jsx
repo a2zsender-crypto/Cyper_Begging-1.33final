@@ -7,6 +7,12 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useQuery } from '@tanstack/react-query'; 
 
+// Helper Mask Key (Ẩn bớt ký tự để bảo mật)
+const maskKey = (key) => {
+    if (!key || key.length < 8) return '****';
+    return key.substring(0, 2) + '****' + key.substring(key.length - 4);
+};
+
 export default function AdminOrders({ session, role }) {
   const { t, lang } = useLang();
   const { addToCart } = useCart();
@@ -64,7 +70,6 @@ export default function AdminOrders({ session, role }) {
               title_en: item.products.title_en,
               price: item.products.price, 
               images: item.products.images,
-              // Giả sử variant được lưu trong item (nếu db hỗ trợ)
               selectedVariants: item.selected_variants || {} 
           };
           for(let i=0; i<item.quantity; i++) addToCart(productToAdd);
@@ -167,17 +172,36 @@ export default function AdminOrders({ session, role }) {
                     <h4 className="font-bold mb-3 flex items-center gap-2 text-slate-700"><ShoppingBag size={18}/> Items</h4>
                     <div className="space-y-3">
                         {showOrderDetail.order_items?.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center border p-3 rounded-xl hover:bg-slate-50 transition">
-                                <div className="flex items-center gap-4">
-                                    <div className="h-12 w-12 bg-slate-100 rounded-lg overflow-hidden border border-slate-200"><img src={item.products?.images?.[0]} className="h-full w-full object-cover"/></div>
-                                    <div>
-                                        <p className="font-bold text-sm text-slate-800 line-clamp-1">{lang === 'vi' ? item.products?.title : (item.products?.title_en || item.products?.title)}</p>
-                                        {/* Hiển thị variants nếu có */}
-                                        {renderVariants(item.selected_variants)}
-                                        <p className="text-xs text-slate-500 mt-0.5">Quantity: x{item.quantity}</p>
+                            <div key={idx} className="border p-3 rounded-xl hover:bg-slate-50 transition">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <div className="h-12 w-12 bg-slate-100 rounded-lg overflow-hidden border border-slate-200"><img src={item.products?.images?.[0]} className="h-full w-full object-cover"/></div>
+                                        <div>
+                                            <p className="font-bold text-sm text-slate-800 line-clamp-1">{lang === 'vi' ? item.products?.title : (item.products?.title_en || item.products?.title)}</p>
+                                            {/* Hiển thị variants nếu có */}
+                                            {renderVariants(item.selected_variants)}
+                                            <p className="text-xs text-slate-500 mt-0.5">Quantity: x{item.quantity}</p>
+                                        </div>
                                     </div>
+                                    <div className="font-mono font-bold text-green-600 text-base">{item.price_at_purchase} USDT</div>
                                 </div>
-                                <div className="font-mono font-bold text-green-600 text-base">{item.price_at_purchase} USDT</div>
+                                
+                                {/* HIỂN THỊ KEY VỚI LOGIC BẢO MẬT (MASK) */}
+                                {item.assigned_key && (
+                                    <div className="mt-3 bg-slate-100 p-3 rounded-lg text-xs font-mono text-slate-600 border border-slate-200">
+                                        <p className="font-bold text-slate-500 mb-1 uppercase tracking-wider text-[10px]">Assigned Key(s):</p>
+                                        <div className="break-all space-y-1">
+                                            {item.assigned_key.split('\n').map((k, kIdx) => (
+                                                <div key={kIdx} className="flex justify-between items-center group bg-white p-1.5 rounded border border-slate-200">
+                                                    <span className="font-medium text-slate-700">{maskKey(k)}</span>
+                                                    <button onClick={() => { navigator.clipboard.writeText(k); toast.success('Key copied!'); }} className="opacity-0 group-hover:opacity-100 text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold hover:bg-blue-100 transition">
+                                                        Copy
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
