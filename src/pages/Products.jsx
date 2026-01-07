@@ -25,7 +25,7 @@ export default function Products() {
     }
   });
 
-  // 2. Dùng React Query để lấy Tồn kho
+  // 2. Dùng React Query để lấy Tồn kho (Yêu cầu có View product_stock)
   const { data: stocks = {} } = useQuery({
     queryKey: ['public-stock'],
     queryFn: async () => {
@@ -47,16 +47,20 @@ export default function Products() {
       });
   }, [products, search, filterType]);
 
+  // [SỬA LỖI] Thêm maxStock vào object
   const handleAddToCart = (p) => {
-      addToCart(p);
+      const currentStock = stocks[p.id] || 0;
+      addToCart({ ...p, maxStock: currentStock });
       toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
+  // [SỬA LỖI] Thêm maxStock vào object
   const handleBuyNow = (p) => {
       if (p.variants && p.variants.length > 0) {
           navigate(`/product/${p.id}`);
       } else {
-          addToCart(p);
+          const currentStock = stocks[p.id] || 0;
+          addToCart({ ...p, maxStock: currentStock });
           navigate('/cart');
       }
   }
@@ -136,9 +140,9 @@ export default function Products() {
                       <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
                           {/* BADGE TRẠNG THÁI HÀNG HOÁ */}
                           <span className={`px-2.5 py-1 text-[10px] font-bold rounded-lg text-white shadow-sm ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`}>
-                             {stock > 0 
-                                ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` 
-                                : (p.allow_external_key ? t('Sẵn hàng', 'In Stock') : t('Hết hàng', 'Out of Stock'))
+                             {isAvailable 
+                                ? (stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Sẵn hàng', 'In Stock')) 
+                                : t('Hết hàng', 'Out of Stock')
                              }
                           </span>
                           
@@ -174,7 +178,11 @@ export default function Products() {
                                 {t('Tùy chọn', 'Options')}
                              </Link>
                          ) : (
-                             <button onClick={() => handleAddToCart(p)} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs">
+                             <button 
+                                onClick={() => handleAddToCart(p)} 
+                                disabled={!isAvailable}
+                                className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                             >
                                 {t('Thêm giỏ', 'Add Cart')}
                              </button>
                          )}
