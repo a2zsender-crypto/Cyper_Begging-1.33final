@@ -21,11 +21,10 @@ export default function Home() {
       .then(({ data }) => setProducts(data || []));
   }, []);
 
-  // --- LOGIC CHECK STOCK CHÍNH XÁC ---
+  // --- LOGIC CHECK STOCK ---
+  // API Mode hoặc Tồn kho vật lý > 0
   const checkAvailability = (p) => {
-      // 1. Dùng đúng tên cột allow_external_key
       if (p.is_digital && p.allow_external_key) return true;
-      // 2. Fallback sang tồn kho vật lý
       return (p.physical_stock > 0);
   };
 
@@ -68,10 +67,7 @@ export default function Home() {
                 {t('Mua sắm với', 'Shop with')} <span className="text-blue-600">Crypto</span>
             </h1>
             <p className="text-slate-500 text-lg mb-10 leading-relaxed">
-                {t(
-                    'Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.',
-                    'High quality digital and physical products with secure cryptocurrency payments via Oxapay.'
-                )}
+                {t('Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.', 'High quality digital and physical products with secure cryptocurrency payments via Oxapay.')}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
