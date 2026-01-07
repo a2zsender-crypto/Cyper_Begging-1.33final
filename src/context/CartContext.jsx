@@ -1,97 +1,146 @@
-import { createContext, useState, useContext, useEffect } from 'react';
-import { toast } from 'react-toastify'; 
-import { useLang } from './LangContext'; 
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import { supabase } from '../supabaseClient';
+import toast from 'react-hot-toast';
 
-const CartContext = createContext();
+export const CartContext = createContext();
 
-export function CartProvider({ children }) {
-  const { t } = useLang(); 
+export const useCart = () => useContext(CartContext);
 
-  const [cart, setCart] = useState(() => {
-    const saved = localStorage.getItem('cart');
-    return saved ? JSON.parse(saved) : [];
-  });
+export const CartProvider = ({ children }) => {
+  const [cart, setCart] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const storedCart = localStorage.getItem('cart');
+    if (storedCart) {
+      setCart(JSON.parse(storedCart));
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Tạo ID duy nhất cho sản phẩm + biến thể
-  const generateCartItemId = (product) => {
-    const variantKey = product.selectedVariants 
-      ? JSON.stringify(product.selectedVariants) 
-      : '';
-    return `${product.id}-${variantKey}`;
+  // --- HÀM TÍNH STOCK CHUẨN (Dùng chung logic này) ---
+  const calculateStock = (product) => {
+    // 1. Nếu bật chế độ lấy Key qua API -> Luôn coi là max tồn kho
+    if (product.check_stock_on_api) {
+      return 999999; 
+    }
+
+    // 2. Nếu có biến thể -> Cộng tổng tồn kho các biến thể
+    if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+      return product.variants.reduce((total, v) => {
+        // Ưu tiên physical_stock, fallback sang stock hoặc quantity nếu cấu trúc data khác
+        const vStock = v.physical_stock ?? v.stock ?? v.quantity ?? 0;
+        return total + Number(vStock);
+      }, 0);
+    }
+
+    // 3. Mặc định: Trả về tồn kho vật lý của sản phẩm cha
+    return Number(product.physical_stock) || 0;
   };
 
-  const addToCart = (product) => {
-    setCart(prev => {
-      const cartItemId = generateCartItemId(product);
-      // Tìm theo cartItemId để chính xác với biến thể
-      const exist = prev.find(item => (item.cartItemId || generateCartItemId(item)) === cartItemId);
-      
-      const limit = product.allow_external_key ? 999999 : (product.maxStock || 0);
-      
-      if (exist) {
-        if (exist.quantity + 1 > limit) {
-            toast.error(t(`Chỉ còn ${limit} sản phẩm trong kho!`, `Only ${limit} items left in stock!`));
-            return prev;
+  const addToCart = (product, quantity = 1, variant = null) => {
+    // Tính toán tồn kho thực tế khả dụng
+    let availableStock = 0;
+
+    if (variant) {
+      // Nếu chọn biến thể cụ thể, chỉ check stock của biến thể đó
+      // Trừ khi là hàng API (check_stock_on_api của cha hoặc variant)
+      const isApi = product.check_stock_on_api || variant.check_stock_on_api;
+      availableStock = isApi ? 999999 : (variant.physical_stock ?? variant.stock ?? 0);
+    } else {
+      // Nếu add sản phẩm cha (hoặc sp không có biến thể), dùng hàm tính tổng
+      availableStock = calculateStock(product);
+    }
+
+    setCart((prevCart) => {
+      // Tìm xem sản phẩm (hoặc biến thể) đã có trong giỏ chưa
+      const existingItemIndex = prevCart.findIndex((item) => {
+        const isSameId = item.id === product.id;
+        const isSameVariant = variant ? item.variant?.id === variant.id : !item.variant;
+        return isSameId && isSameVariant;
+      });
+
+      if (existingItemIndex > -1) {
+        // Sản phẩm đã có -> Tăng số lượng
+        const currentQty = prevCart[existingItemIndex].quantity;
+        const newQty = currentQty + quantity;
+
+        if (newQty > availableStock) {
+          toast.error(`Sản phẩm này chỉ còn ${availableStock} đơn vị!`);
+          return prevCart; // Không thay đổi gì
         }
-        return prev.map(item => 
-          (item.cartItemId || generateCartItemId(item)) === cartItemId 
-            ? { ...item, quantity: item.quantity + 1 } 
-            : item
-        );
-      }
 
-      if (1 > limit) {
-          toast.error(t("Sản phẩm đã hết hàng!", "Product is out of stock!"));
-          return prev;
-      }
+        const newCart = [...prevCart];
+        newCart[existingItemIndex].quantity = newQty;
+        toast.success("Đã cập nhật số lượng trong giỏ hàng!");
+        return newCart;
+      } else {
+        // Sản phẩm chưa có -> Thêm mới
+        if (quantity > availableStock) {
+          toast.error("Sản phẩm đã hết hàng hoặc không đủ số lượng!");
+          return prevCart;
+        }
 
-      // Lưu luôn cartItemId vào item để dễ truy xuất sau này
-      return [...prev, { ...product, quantity: 1, cartItemId }];
+        toast.success("Đã thêm vào giỏ hàng!");
+        return [...prevCart, { ...product, quantity, variant }];
+      }
     });
   };
 
-  // SỬA: Nhận 'quantity' là số lượng mới mong muốn (absolute value), không phải delta
-  const updateQuantity = (cartItemId, quantity) => {
-    setCart(prev => prev.map(item => {
-      const currentId = item.cartItemId || generateCartItemId(item);
-      
-      if (currentId === cartItemId) {
-        // Kiểm tra tồn kho
-        const limit = item.allow_external_key ? 999999 : (item.maxStock || 0);
-        
-        if (quantity > limit) {
-            toast.warn(t(`Kho chỉ còn ${limit} sản phẩm này.`, `Only ${limit} items of this product left.`));
-            // Trả về item cũ, không update
-            return item; 
+  const removeFromCart = (productId, variantId = null) => {
+    setCart((prevCart) =>
+      prevCart.filter((item) => {
+        if (variantId) {
+          return !(item.id === productId && item.variant?.id === variantId);
         }
-
-        // Cập nhật số lượng mới (nếu > 0)
-        return quantity > 0 ? { ...item, quantity: quantity } : item;
-      }
-      return item;
-    }));
+        return item.id !== productId;
+      })
+    );
+    toast.success("Đã xóa sản phẩm khỏi giỏ!");
   };
 
-  const removeFromCart = (cartItemId) => {
-    setCart(prev => prev.filter(item => {
-      const currentId = item.cartItemId || generateCartItemId(item);
-      return currentId !== cartItemId;
-    }));
+  const updateQuantity = (productId, amount, variantId = null) => {
+    setCart((prevCart) => {
+      return prevCart.map((item) => {
+        if (item.id === productId && (variantId ? item.variant?.id === variantId : !item.variant)) {
+           // Cần check stock lại ở đây nếu muốn chặt chẽ (optional)
+           // Tạm thời chỉ chặn < 1
+           const newQty = Math.max(1, item.quantity + amount);
+           return { ...item, quantity: newQty };
+        }
+        return item;
+      });
+    });
   };
 
-  const clearCart = () => setCart([]);
-  
-  const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const clearCart = () => {
+    setCart([]);
+    localStorage.removeItem('cart');
+  };
+
+  const cartTotal = cart.reduce((total, item) => {
+    const price = item.variant ? (item.variant.price || item.price) : item.price;
+    return total + price * item.quantity;
+  }, 0);
 
   return (
-    <CartContext.Provider value={{ cart, addToCart, removeFromCart, clearCart, updateQuantity, totalAmount }}>
+    <CartContext.Provider
+      value={{
+        cart,
+        addToCart,
+        removeFromCart,
+        updateQuantity,
+        clearCart,
+        cartTotal,
+        loading,
+        calculateStock // Export hàm này để các trang khác dùng nếu cần hiển thị
+      }}
+    >
       {children}
     </CartContext.Provider>
   );
-}
-
-export const useCart = () => useContext(CartContext);
+};
