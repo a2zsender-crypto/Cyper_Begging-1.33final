@@ -1,148 +1,164 @@
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Link, useNavigate } from 'react-router-dom';
+import { FiShoppingCart, FiArrowRight, FiCheck, FiX } from 'react-icons/fi';
 import { useCart } from '../context/CartContext';
-import { useLang } from '../context/LangContext';
-import { Zap, Wallet, ShieldCheck, ShoppingBag } from 'lucide-react'; // Thêm icon mới
+import toast from 'react-hot-toast';
 
 export default function Home() {
   const [products, setProducts] = useState([]);
-  const [stocks, setStocks] = useState({});
+  const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
-  const { t, lang } = useLang();
-  const navigate = useNavigate();
 
   useEffect(() => {
-    // Lấy danh sách sản phẩm
-    supabase.from('products').select('*').order('id', { ascending: false }).then(({ data }) => setProducts(data || []));
-    
-    // Lấy tồn kho
-    supabase.from('product_stock').select('*').then(({ data }) => {
-       const map = {};
-       data?.forEach(s => map[s.product_id] = s.stock_count);
-       setStocks(map);
-    });
+    fetchLatestProducts();
   }, []);
 
-  const handleAddToCart = (p) => {
-      addToCart(p);
-      alert(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
+  const fetchLatestProducts = async () => {
+    try {
+      // Lấy products và sắp xếp mới nhất
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleBuyNow = (p) => {
-      addToCart(p);
-      navigate('/cart');
-  }
+  // Hàm kiểm tra còn hàng hay không để hiển thị UI
+  const checkAvailability = (product) => {
+    // 1. Nếu là API -> Luôn có hàng
+    if (product.get_key_api) return true;
+    // 2. Nếu không -> Check tồn kho vật lý (đã được SQL sync)
+    return (product.physical_stock > 0);
+  };
+
+  const handleAddToCart = (e, product) => {
+    e.preventDefault(); // Ngăn chặn chuyển hướng thẻ Link
+    if (!checkAvailability(product)) {
+      toast.error('Sản phẩm tạm hết hàng');
+      return;
+    }
+    // Mặc định chọn variant đầu tiên nếu có
+    const defaultVariant = product.variant_stocks && product.variant_stocks.length > 0
+      ? product.variant_stocks[0].options
+      : null;
+      
+    addToCart(product, defaultVariant);
+  };
 
   return (
-    <div>
-      {/* === HERO SECTION (MỚI) === */}
-      <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
-        <div className="text-center max-w-3xl mx-auto px-4">
-            <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
-                {t('Mua sắm với', 'Shop with')} <span className="text-blue-600">Crypto</span>
-            </h1>
-            <p className="text-slate-500 text-lg mb-10 leading-relaxed">
-                {t(
-                    'Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.',
-                    'High quality digital and physical products with secure cryptocurrency payments via Oxapay.'
-                )}
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-                {/* Feature 1 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white flex-shrink-0">
-                        <Zap size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{t('Giao hàng nhanh', 'Fast Delivery')}</h3>
-                        <p className="text-xs text-slate-500">{t('Sản phẩm số tức thì', 'Instant digital items')}</p>
-                    </div>
-                </div>
-
-                {/* Feature 2 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600 flex-shrink-0">
-                        <Wallet size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{t('Thanh toán Crypto', 'Crypto Payment')}</h3>
-                        <p className="text-xs text-slate-500">USDT, BTC, ETH</p>
-                    </div>
-                </div>
-
-                {/* Feature 3 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
-                        <ShieldCheck size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{t('Bảo mật cao', 'High Security')}</h3>
-                        <p className="text-xs text-slate-500">{t('Giao dịch an toàn', 'Secure transactions')}</p>
-                    </div>
-                </div>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* Hero Section - Giữ nguyên */}
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-20">
+        <div className="container mx-auto px-4 text-center">
+          <h1 className="text-4xl md:text-5xl font-bold mb-6">
+            Giải Pháp Bản Quyền Số Tự Động
+          </h1>
+          <p className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
+            Cung cấp key bản quyền, tài khoản Premium và giải pháp phần mềm chất lượng cao. 
+            Nhận hàng ngay lập tức qua Email.
+          </p>
+          <Link 
+            to="/products" 
+            className="inline-flex items-center bg-white text-blue-700 px-8 py-3 rounded-full font-bold hover:bg-blue-50 transition-colors shadow-lg"
+          >
+            Xem Tất Cả Sản Phẩm
+            <FiArrowRight className="ml-2" />
+          </Link>
         </div>
-      </section>
+      </div>
 
-      {/* === PRODUCT LIST === */}
-      <h2 className="text-2xl font-bold mb-8 text-slate-800 flex items-center gap-2">
-          <ShoppingBag className="text-blue-600"/> {t('Sản phẩm mới nhất', 'Latest Products')}
-      </h2>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
-        {products.map((p) => {
-          const stock = stocks[p.id] || 0;
-          
-          return (
-            <div key={p.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
-              <Link to={`/product/${p.id}`}>
-                <div className="h-56 overflow-hidden bg-gray-100 relative">
-                  {p.images && p.images[0] ? (
-                    <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
-                  ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
-                  
-                  {/* Badge Tồn kho */}
-                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}>
-                     {stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Hết hàng', 'Out of Stock')}
-                  </div>
-                </div>
-              </Link>
+      {/* Latest Products Section */}
+      <div className="container mx-auto px-4 py-16">
+        <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Sản Phẩm Mới Nhất</h2>
+        
+        {loading ? (
+          <div className="flex justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {products.map((product) => {
+              const isAvailable = checkAvailability(product);
               
-              <div className="p-5 flex flex-col flex-grow">
-                <Link to={`/product/${p.id}`}>
-                  {/* Tên sản phẩm theo ngôn ngữ */}
-                  <h3 className="font-bold text-lg mb-2 text-slate-800 hover:text-blue-600 transition truncate">
-                      {lang === 'vi' ? p.title : (p.title_en || p.title)}
-                  </h3>
-                </Link>
-                
-                <div className="mt-auto">
-                  <div className="flex justify-between items-center mb-4">
-                     {/* Giá USDT */}
-                     <span className="text-green-600 font-bold text-xl">{p.price} USDT</span>
-                     
-                     {/* Badge loại sản phẩm */}
-                     {p.is_digital ? 
-                        <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 font-bold">DIGITAL</span> :
-                        <span className="text-[10px] bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-100 font-bold">PHYSICAL</span>
-                     }
+              return (
+                <Link 
+                  to={`/products/${product.id}`} 
+                  key={product.id}
+                  className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden group flex flex-col h-full"
+                >
+                  <div className="aspect-video bg-gray-100 relative overflow-hidden">
+                    <img 
+                      src={product.image_url || 'https://via.placeholder.com/400x225?text=No+Image'} 
+                      alt={product.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    
+                    {/* Badge Tình trạng kho */}
+                    <div className="absolute top-2 right-2">
+                      {isAvailable ? (
+                        <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center shadow-sm">
+                          <FiCheck className="mr-1" />
+                          {product.get_key_api ? 'Auto API' : 'Sẵn hàng'}
+                        </span>
+                      ) : (
+                        <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center shadow-sm">
+                          <FiX className="mr-1" />
+                          Hết hàng
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Badge Category */}
+                    <div className="absolute top-2 left-2">
+                      <span className="bg-black/50 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full">
+                        {product.category === 'software' ? 'Phần mềm' : 
+                         product.category === 'account' ? 'Tài khoản' : 'Vật lý'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex gap-2">
-                     <button onClick={() => handleAddToCart(p)} className="flex-1 bg-white text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-50 transition border border-slate-200 text-sm">
-                        {t('Thêm giỏ', 'Add to Cart')}
-                     </button>
-                     <button onClick={() => handleBuyNow(p)} disabled={stock===0} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-sm">
-                        {t('Mua ngay', 'Buy Now')}
-                     </button>
+                  <div className="p-4 flex flex-col flex-grow">
+                    <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3rem]">
+                      {product.name}
+                    </h3>
+                    <div className="mt-auto flex items-center justify-between">
+                      <span className="text-blue-600 font-bold text-lg">
+                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
+                      </span>
+                      <button 
+                        onClick={(e) => handleAddToCart(e, product)}
+                        disabled={!isAvailable}
+                        className={`p-2 rounded-lg transition-colors ${
+                          isAvailable 
+                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        }`}
+                        title={isAvailable ? "Thêm vào giỏ" : "Hết hàng"}
+                      >
+                        <FiShoppingCart className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          )
-        })}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+        
+        <div className="text-center mt-12">
+          <Link to="/products" className="text-blue-600 font-medium hover:text-blue-700 hover:underline">
+            Xem thêm sản phẩm &rarr;
+          </Link>
+        </div>
       </div>
     </div>
   );
