@@ -8,7 +8,7 @@ import { toast } from 'react-toastify';
 export default function AdminContacts({ session, role, activeTicketId }) {
   const { t } = useLang();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams(); // Hook lấy params từ URL
+  const [searchParams] = useSearchParams(); // [MỚI] Hook lấy params từ URL
   const [contacts, setContacts] = useState([]);
   const [showTicketModal, setShowTicketModal] = useState(null);
   const [ticketReplies, setTicketReplies] = useState([]);
@@ -19,34 +19,53 @@ export default function AdminContacts({ session, role, activeTicketId }) {
     fetchContacts();
   }, [role, session]);
 
-  // --- LOGIC MỚI: TỰ ĐỘNG MỞ TICKET TỪ URL HOẶC PROPS ---
+  // LOGIC 1: MỞ TICKET TỰ ĐỘNG (Kết hợp cả props và URL)
   useEffect(() => {
+      // Ưu tiên lấy từ URL trước để đảm bảo click thông báo hoạt động
       const urlTicketId = searchParams.get('ticketId');
-      const targetId = activeTicketId || urlTicketId;
+      const targetId = urlTicketId || activeTicketId;
 
       // Chỉ mở khi danh sách contacts đã load xong và có targetId
       if (targetId && contacts.length > 0) {
           const ticket = contacts.find(c => c.id.toString() === targetId);
           if (ticket) {
-              // Kiểm tra nếu chưa mở thì mới mở để tránh loop
+              // Kiểm tra nếu chưa mở hoặc đang mở ticket khác thì mới mở
               if (!showTicketModal || showTicketModal.id !== ticket.id) {
                   openTicketChat(ticket);
               }
           }
       }
-  }, [activeTicketId, contacts, searchParams]);
+  }, [activeTicketId, contacts, searchParams]); // Thêm searchParams vào dependency
+
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (Xử lý khi click thông báo mà không reload trang)
+  useEffect(() => {
+      const handleForceOpen = (e) => {
+          const ticketId = e.detail;
+          const ticket = contacts.find(c => c.id.toString() === ticketId);
+          if (ticket) {
+              openTicketChat(ticket);
+          } else {
+              // Nếu ticket chưa có trong list (mới tạo), fetch lại rồi mở
+              fetchContacts().then((data) => {
+                  const newTicket = data?.find(c => c.id.toString() === ticketId);
+                  if (newTicket) openTicketChat(newTicket);
+              });
+          }
+      };
+
+      window.addEventListener('FORCE_OPEN_TICKET', handleForceOpen);
+      return () => window.removeEventListener('FORCE_OPEN_TICKET', handleForceOpen);
+  }, [contacts]);
 
   // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
 
-  // REALTIME CONTACTS LIST
+  // REALTIME
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts-list')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, 
-          (payload) => { 
-              setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); 
-          })
+          (payload) => { setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); })
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, 
           (payload) => {
               if (role === 'admin' || (role === 'user' && payload.new.email === session.user.email)) {
@@ -58,7 +77,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT MESSAGES
+  // REALTIME CHAT
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-room-${showTicketModal.id}`)
@@ -87,7 +106,6 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       const { data } = await supabase.from('contact_replies').select('*').eq('contact_id', ticket.id).order('created_at', { ascending: true });
       setTicketReplies(data || []);
       
-      // Admin mở thì set processed, User mở thì thôi
       if (role === 'admin' && ticket.status === 'new') {
           await supabase.from('contacts').update({ status: 'processed' }).eq('id', ticket.id);
       }
