@@ -3,17 +3,18 @@ import { useLang } from '../context/LangContext';
 import { supabase } from '../supabaseClient';
 import { 
   RotateCcw, CreditCard, HelpCircle, FileText, Headset, 
-  Box, Bitcoin, AlertTriangle, Clock, ShieldCheck, 
-  ShoppingCart, QrCode, CheckCircle, Ticket, MessageSquare, Mail,
-  ChevronRight, Scale, AlertCircle, FileWarning
+  Box, Bitcoin, AlertTriangle, CheckCircle, Ticket, MessageSquare, Mail,
+  ChevronRight, Scale, ShieldCheck, ShoppingCart, QrCode
 } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'; // [MỚI] Thêm useNavigate, useSearchParams
 
 export default function Support() {
   const { t } = useLang(); 
   const [activeSection, setActiveSection] = useState('returns');
   const [settings, setSettings] = useState({});
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // 1. Load Settings
   useEffect(() => {
@@ -24,7 +25,18 @@ export default function Support() {
       });
   }, []);
 
-  // 2. Logic Scroll Spy
+  // [MỚI] 2. LOGIC TỰ ĐỘNG CHUYỂN HƯỚNG TICKET
+  // Vì trang Support chỉ là trang thông tin, nếu URL có ticketId thì chuyển sang trang /contact
+  // để mở giao diện chat ticket.
+  useEffect(() => {
+      const ticketId = searchParams.get('ticketId');
+      if (ticketId) {
+          // Chuyển hướng sang trang Contact và giữ nguyên tham số ticketId
+          navigate(`/contact?ticketId=${ticketId}`, { replace: true });
+      }
+  }, [searchParams, navigate]);
+
+  // 3. Logic Scroll Spy
   useEffect(() => {
     const handleScroll = () => {
       const sections = ['returns', 'payment', 'faq', 'terms', 'support'];
@@ -41,7 +53,7 @@ export default function Support() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // 3. Auto Scroll from Link
+  // 4. Auto Scroll from Link (Hash handling)
   useEffect(() => {
       if (location.hash) {
           const id = location.hash.replace('#', '');
@@ -94,7 +106,7 @@ export default function Support() {
         </div>
       </aside>
 
-      {/* === MAIN CONTENT (NỘI DUNG ĐÃ ĐƯỢC VIẾT LẠI CHI TIẾT) === */}
+      {/* === MAIN CONTENT (NỘI DUNG) === */}
       <main className="flex-1 min-w-0">
 
         {/* 1. CHÍNH SÁCH ĐỔI TRẢ */}
@@ -378,7 +390,7 @@ export default function Support() {
                     <span className="text-blue-600 text-sm font-bold flex items-center justify-center gap-1 group-hover:gap-2 transition-all">{t('Chat ngay', 'Chat Now')} <ChevronRight size={16}/></span>
                 </a>
 
-                {/* 3. Email (ĐÃ SỬA NỘI DUNG VÀ BỎ CLASS CŨ) */}
+                {/* 3. Email */}
                 <a 
                     href={`mailto:${settings.contact_email || 'support@anvu.vn'}`} 
                     className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:border-blue-500 hover:shadow-lg transition text-center group h-full flex flex-col justify-center"
