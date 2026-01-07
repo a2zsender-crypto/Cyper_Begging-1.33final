@@ -8,12 +8,8 @@ export function CartProvider({ children }) {
   const { t } = useLang(); 
 
   const [cart, setCart] = useState(() => {
-    try {
-        const saved = localStorage.getItem('cart');
-        return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-        return [];
-    }
+    const saved = localStorage.getItem('cart');
+    return saved ? JSON.parse(saved) : [];
   });
 
   useEffect(() => {
@@ -28,49 +24,19 @@ export function CartProvider({ children }) {
     return `${product.id}-${variantKey}`;
   };
 
-  // --- HÀM TÍNH TỒN KHO NỘI BỘ ---
-  const getProductStockLimit = (product) => {
-    // 1. Nếu cho phép lấy key ngoài -> Vô cực
-    if (product.allow_external_key) return 999999;
-
-    // 2. Nếu đã được truyền maxStock từ bên ngoài (từ Products.jsx) thì dùng luôn
-    if (product.maxStock !== undefined && product.maxStock !== null) return product.maxStock;
-
-    // 3. Nếu không, tự tính lại dựa trên dữ liệu raw
-    if (!product.is_digital) return product.physical_stock || 0;
-    
-    // Logic cho hàng digital có biến thể
-    if (product.variant_stocks && Array.isArray(product.variant_stocks)) {
-        // Nếu đã chọn biến thể
-        if (product.selectedVariants) {
-             const vStock = product.variant_stocks.find(v => JSON.stringify(v.options) === JSON.stringify(product.selectedVariants));
-             return vStock ? (Number(vStock.stock) || 0) : 0;
-        }
-        // Nếu chưa chọn biến thể (add generic)
-        return product.variant_stocks.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
-    }
-    
-    return 0; // Mặc định hết hàng
-  };
-
   const addToCart = (product) => {
-    const cartItemId = generateCartItemId(product);
-    
     setCart(prev => {
+      const cartItemId = generateCartItemId(product);
       // Tìm theo cartItemId để chính xác với biến thể
       const exist = prev.find(item => (item.cartItemId || generateCartItemId(item)) === cartItemId);
       
-      // Tính tồn kho thực tế
-      const limit = getProductStockLimit(product);
+      const limit = product.allow_external_key ? 999999 : (product.maxStock || 0);
       
       if (exist) {
-        // Kiểm tra xem cộng thêm 1 có vượt quá giới hạn không
         if (exist.quantity + 1 > limit) {
             toast.error(t(`Chỉ còn ${limit} sản phẩm trong kho!`, `Only ${limit} items left in stock!`));
-            return prev; // Trả về cart cũ, KHÔNG cộng thêm
+            return prev;
         }
-        
-        toast.success(t('Đã cập nhật số lượng!', 'Quantity updated!'));
         return prev.map(item => 
           (item.cartItemId || generateCartItemId(item)) === cartItemId 
             ? { ...item, quantity: item.quantity + 1 } 
@@ -78,16 +44,13 @@ export function CartProvider({ children }) {
         );
       }
 
-      // Thêm mới
-      if (limit < 1) {
-          toast.error(t('Sản phẩm đã hết hàng!', 'Product is out of stock!'));
+      if (1 > limit) {
+          toast.error(t("Sản phẩm đã hết hàng!", "Product is out of stock!"));
           return prev;
       }
 
-      toast.success(t('Đã thêm vào giỏ!', 'Added to cart!'));
       // Lưu luôn cartItemId vào item để dễ truy xuất sau này
-      // Lưu ý: maxStock được truyền vào item để dùng cho updateQuantity
-      return [...prev, { ...product, quantity: 1, cartItemId, maxStock: limit }];
+      return [...prev, { ...product, quantity: 1, cartItemId }];
     });
   };
 
@@ -97,8 +60,8 @@ export function CartProvider({ children }) {
       const currentId = item.cartItemId || generateCartItemId(item);
       
       if (currentId === cartItemId) {
-        // Tính lại limit để chắc chắn (ưu tiên maxStock đã lưu, hoặc tính lại)
-        const limit = getProductStockLimit(item);
+        // Kiểm tra tồn kho
+        const limit = item.allow_external_key ? 999999 : (item.maxStock || 0);
         
         if (quantity > limit) {
             toast.warn(t(`Kho chỉ còn ${limit} sản phẩm này.`, `Only ${limit} items of this product left.`));
@@ -125,8 +88,10 @@ export function CartProvider({ children }) {
   const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   return (
-    <CartContext.Provider value={{ cart, addToCart, removeFromCart, updateQuantity, clearCart, totalAmount }}>
+    <CartContext.Provider value={{ cart, addToCart, removeFromCart, clearCart, updateQuantity, totalAmount }}>
       {children}
     </CartContext.Provider>
   );
 }
+
+export const useCart = () => useContext(CartContext);
