@@ -22,7 +22,6 @@ const Products = () => {
 
   const fetchCategories = async () => {
     try {
-      // Lấy danh sách category unique từ bảng products
       const { data, error } = await supabase
         .from('products')
         .select('category');
@@ -41,17 +40,14 @@ const Products = () => {
       setLoading(true);
       let query = supabase.from('products').select('*');
 
-      // Filter by Category
       if (selectedCategory !== 'all') {
         query = query.eq('category', selectedCategory);
       }
 
-      // Filter by Search
       if (searchQuery) {
         query = query.ilike('name', `%${searchQuery}%`);
       }
 
-      // Sort
       query = query.order('created_at', { ascending: false });
 
       const { data, error } = await query;
@@ -130,8 +126,9 @@ const Products = () => {
       ) : products.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {products.map((product) => {
-            // LOGIC TÍNH TOÁN STOCK CHÍNH XÁC (Đồng nhất với Home)
-            const isAvailable = product.get_key_via_api === true || (product.physical_stock > 0);
+            // --- FIX LOGIC HIỂN THỊ STOCK ---
+            // Đồng bộ logic với Home.jsx
+            const isAvailable = product.get_key_via_api === true || (product.physical_stock && product.physical_stock > 0);
 
             return (
               <div key={product.id} className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 border border-gray-100 dark:border-gray-700 overflow-hidden flex flex-col">
@@ -141,6 +138,7 @@ const Products = () => {
                     alt={product.name}
                     className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500"
                   />
+                  
                   {/* Badge Stock */}
                   {!isAvailable && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
