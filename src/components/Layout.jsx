@@ -39,26 +39,36 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // LOGIC CHUÔNG (User & Admin)
+  // LOGIC CHUÔNG (User & Admin) - ĐÃ SỬA LOGIC ĐỒNG BỘ
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
+          setUnreadCount(0);
           return;
       }
       const uid = session.user.id;
 
-      // Lấy thông báo cũ
       const fetchNoti = async () => {
+          // 1. Lấy danh sách hiển thị (15 cái mới nhất)
           const { data } = await supabase.from('notifications')
               .select('*')
               .eq('user_id', uid)
               .order('created_at', {ascending: false})
               .limit(15);
+          
           if (data) {
               setNotifications(data);
-              setUnreadCount(data.filter(n => !n.is_read).length);
           }
+
+          // 2. Lấy số lượng chưa đọc chính xác từ Database (Fix lỗi hiển thị sai số lượng)
+          const { count } = await supabase.from('notifications')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', uid)
+              .eq('is_read', false);
+          
+          setUnreadCount(count || 0);
       };
+      
       fetchNoti();
 
       // Lắng nghe thông báo mới
@@ -78,20 +88,29 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
-  // --- XỬ LÝ CLICK THÔNG BÁO (ĐÃ FIX DELAY) ---
+  // --- XỬ LÝ CLICK THÔNG BÁO (ĐÃ FIX DELAY & ĐỒNG BỘ) ---
   const handleReadNoti = async (noti) => {
+      // Chỉ cập nhật nếu chưa đọc
       if (!noti.is_read) {
-          await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
+          // 1. Cập nhật UI ngay lập tức để trải nghiệm mượt mà
           setUnreadCount(prev => Math.max(0, prev - 1));
           setNotifications(prev => prev.map(n => n.id === noti.id ? { ...n, is_read: true } : n));
+
+          // 2. Gửi lệnh update xuống DB (Cần SQL Policy ở Bước 1 để hoạt động)
+          const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
+          
+          if (error) {
+              console.error("Lỗi update notification:", error);
+              // Nếu lỗi, revert lại UI (tuỳ chọn, nhưng giữ đơn giản thì thôi)
+          }
       }
       
       setShowNotiDropdown(false);
 
       if (noti.link) {
-          navigate(noti.link); // Chuyển trang trước
+          navigate(noti.link); 
           
-          // NẾU LÀ TICKET: Chờ 500ms để trang AdminContacts kịp load (Mount) rồi mới bắn lệnh mở
+          // NẾU LÀ TICKET: Chờ để trang AdminContacts kịp load
           if (noti.link.includes('ticketId=')) {
              try {
                  const ticketId = noti.link.split('ticketId=')[1];
