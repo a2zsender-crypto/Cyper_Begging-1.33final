@@ -1,251 +1,148 @@
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { useCart } from '../context/CartContext';
-import { useLang } from '../context/LangContext';
-import { ShoppingCart, CreditCard, CheckCircle, Tag, AlertTriangle, Zap, Box } from 'lucide-react'; 
-import { toast } from 'react-toastify';
+import { CartContext } from '../context/CartContext';
+import { LangContext } from '../context/LangContext';
 
-export default function ProductDetail() {
+const ProductDetail = () => {
   const { id } = useParams();
-  const { addToCart, cart } = useCart();
-  const { lang, t } = useLang();
   const navigate = useNavigate();
-  
   const [product, setProduct] = useState(null);
-  const [mainImg, setMainImg] = useState('');
-  
-  const [selectedOptions, setSelectedOptions] = useState({});
-  const [finalPrice, setFinalPrice] = useState(0);
-  const [currentStock, setCurrentStock] = useState(0); 
-  const [loadingStock, setLoadingStock] = useState(true); // Thêm state loading để tránh hiện số ảo
+  const [loading, setLoading] = useState(true);
+  const { addToCart } = useContext(CartContext);
+  const { lang } = useContext(LangContext);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    supabase.from('products').select('*').eq('id', id).single().then(async ({ data }) => {
-      if (data) {
-          setProduct(data);
-          if (data.images?.length) setMainImg(data.images[0]);
-          setFinalPrice(data.price);
-          
-          if (data.variants && Array.isArray(data.variants)) {
-              const defaults = {};
-              data.variants.forEach(v => {
-                  if (v.options && v.options.length > 0) {
-                      defaults[v.name] = v.options[0].label;
-                  }
-              });
-              setSelectedOptions(defaults);
-          }
-          // Lưu ý: Không set currentStock ngay ở đây bằng data.physical_stock nữa
-          // Để useEffect bên dưới tự chạy checkStock realtime
-      }
-    });
+    fetchProduct();
   }, [id]);
 
-  // --- HÀM CHECK STOCK REALTIME (SỬA LẠI) ---
-  const checkStock = async (prod, options) => {
-      if (!prod) return;
-      setLoadingStock(true);
-      
-      try {
-          if (prod.is_digital) {
-              // LOGIC DIGITAL: Đếm trực tiếp từ product_keys. 
-              // TUYỆT ĐỐI KHÔNG fallback về prod.physical_stock hay prod.variant_stocks
-              
-              let query = supabase
-                .from('product_keys')
-                .select('*', { count: 'exact', head: true }) // Chỉ lấy số lượng, không lấy data để nhẹ
-                .eq('product_id', prod.id)
-                .eq('is_used', false);
+  const fetchProduct = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-              // Nếu đang chọn biến thể (options không rỗng)
-              // Lọc key có chứa thông tin variant này
-              if (Object.keys(options).length > 0) {
-                  query = query.contains('variant_info', options);
-              }
-               
-              const { count, error } = await query;
-              
-              if (error) {
-                  console.error("Stock check error:", error);
-                  setCurrentStock(0); // Lỗi thì coi như hết hàng để an toàn
-              } else {
-                  setCurrentStock(count || 0);
-              }
-
-          } else {
-              // LOGIC PHYSICAL (Giữ nguyên logic lấy từ json variant_stocks)
-              if (prod.variant_stocks && prod.variant_stocks.length > 0) {
-                  const stockItem = prod.variant_stocks.find(item => {
-                      const itemOpts = item.options;
-                      const selectedKeys = Object.keys(options);
-                      if (Object.keys(itemOpts).length !== selectedKeys.length) return false;
-                      return selectedKeys.every(key => itemOpts[key] === options[key]);
-                  });
-                  setCurrentStock(stockItem ? parseInt(stockItem.stock) : 0);
-              } else {
-                  setCurrentStock(prod.physical_stock || 0);
-              }
-          }
-      } catch (err) {
-          console.error(err);
-          setCurrentStock(0);
-      } finally {
-          setLoadingStock(false);
-      }
+      if (error) throw error;
+      setProduct(data);
+    } catch (error) {
+      console.error('Error fetching product:', error);
+      navigate('/products'); // Redirect back to products if not found
+    } finally {
+      setLoading(false);
+    }
   };
-
-  // Trigger checkStock mỗi khi product load xong HOẶC options thay đổi
-  useEffect(() => {
-      if (!product) return;
-      
-      // 1. Tính giá
-      let extra = 0;
-      if (product.variants) {
-          product.variants.forEach(v => {
-              const selectedLabel = selectedOptions[v.name];
-              const optionData = v.options.find(o => o.label === selectedLabel);
-              if (optionData && optionData.price_mod) extra += parseFloat(optionData.price_mod);
-          });
-      }
-      setFinalPrice(product.price + extra);
-
-      // 2. Gọi check stock realtime
-      checkStock(product, selectedOptions);
-
-  }, [selectedOptions, product]); // Dependency quan trọng: selectedOptions
-
-  const handleOptionChange = (variantName, value) => {
-      setSelectedOptions(prev => ({ ...prev, [variantName]: value }));
-      const variantGroup = product.variants.find(v => v.name === variantName);
-      if (variantGroup) {
-          const selectedOpt = variantGroup.options.find(o => o.label === value);
-          if (selectedOpt && selectedOpt.image) setMainImg(selectedOpt.image);
-      }
-  };
-
-  const getProductToAdd = () => ({ 
-      ...product, 
-      price: finalPrice, 
-      selectedVariants: selectedOptions,
-      maxStock: currentStock // Quan trọng: Truyền stock thực tế vào để CartContext chặn
-  });
-
-  const isOutOfStock = !loadingStock && currentStock <= 0 && !product?.allow_external_key;
 
   const handleAddToCart = () => {
-      if (loadingStock) return;
-      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
-      
-      const currentCartItem = cart.find(i => 
-          i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
-      );
-      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
-      
-      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
-          return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left in stock.`));
-      }
-
-      if(product) { 
-          addToCart(getProductToAdd()); 
-          toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart!")); 
-      }
-  }
+    setAdding(true);
+    addToCart(product);
+    setTimeout(() => setAdding(false), 500);
+  };
 
   const handleBuyNow = () => {
-      if (loadingStock) return;
-      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
-      
-      const currentCartItem = cart.find(i => 
-          i.id === product.id && JSON.stringify(i.selectedVariants) === JSON.stringify(selectedOptions)
-      );
-      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+    addToCart(product);
+    navigate('/cart');
+  };
 
-      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
-          return toast.warn(t("Không đủ hàng trong kho!", "Not enough stock!"));
-      }
+  const formatPrice = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2
+    }).format(amount);
+  };
 
-      if(product) { 
-          addToCart(getProductToAdd()); 
-          navigate('/cart'); 
-      }
-  }
+  if (loading) return <div className="text-center py-12">Loading...</div>;
+  if (!product) return null;
 
-  if (!product) return <div className="flex justify-center items-center h-64 text-slate-400">Loading...</div>;
-
-  const displayTitle = lang === 'vi' ? product.title : (product.title_en || product.title);
-  const displayDesc = lang === 'vi' ? product.description : (product.description_en || product.description);
+  // FIX: Stock Logic - API type or stock > 0
+  const isAvailable = product.stock > 0 || product.type === 'key' || product.api_type === 'yes';
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 md:flex gap-10">
-        <div className="md:w-1/2 flex flex-col gap-4">
-          <div className="h-80 md:h-96 bg-gray-50 rounded-2xl overflow-hidden border border-slate-100 flex items-center justify-center p-4">
-            <img src={mainImg} alt={displayTitle} className="w-full h-full object-contain hover:scale-105 transition duration-500" />
-          </div>
-          {product.images?.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-              {product.images.map((img, idx) => (
-                <img key={idx} src={img} onClick={() => setMainImg(img)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === img ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} />
-              ))}
+      <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-8">
+          {/* Image Section */}
+          <div className="space-y-4">
+            <div className="aspect-video rounded-xl overflow-hidden bg-gray-100">
+              <img 
+                src={product.image_url || 'https://via.placeholder.com/600x400?text=No+Image'} 
+                alt={product.name}
+                className="w-full h-full object-cover"
+              />
             </div>
-          )}
-        </div>
-
-        <div className="md:w-1/2 mt-8 md:mt-0 flex flex-col">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4 leading-tight">{displayTitle}</h1>
-          <div className="flex items-center gap-4 mb-6">
-             <div className="text-3xl font-extrabold text-green-600">{finalPrice.toFixed(2)} USDT</div>
-             {product.is_digital ? <span className="flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded-full uppercase"><Zap size={12}/> Digital Key</span> : <span className="flex items-center gap-1 px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full uppercase"><Box size={12}/> Physical</span>}
           </div>
 
-          <div className={`mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${!isOutOfStock ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {loadingStock ? (
-                  <span className="animate-pulse">Checking stock...</span>
-              ) : !isOutOfStock ? (
-                  <><CheckCircle size={16}/> {product.allow_external_key && currentStock <=0 ? t('Sẵn hàng', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
-              ) : (
-                  <><AlertTriangle size={16}/> {t('Hết hàng', 'Out of Stock')}</>
-              )}
-          </div>
-
-          {product.variants && product.variants.length > 0 && (
-              <div className="mb-6 space-y-4 p-5 bg-slate-50 rounded-xl border border-slate-100">
-                  {product.variants.map((variant, idx) => (
-                      <div key={idx}>
-                          <p className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1"><Tag size={14}/> {variant.name}</p>
-                          <div className="flex flex-wrap gap-2">
-                              {variant.options.map((opt, optIdx) => {
-                                  const displayLabel = lang === 'vi' ? opt.label : (opt.label_en || opt.label);
-                                  const isSelected = selectedOptions[variant.name] === opt.label; 
-                                  return (
-                                      <button key={optIdx} onClick={() => handleOptionChange(variant.name, opt.label)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
-                                          {displayLabel} {parseFloat(opt.price_mod) > 0 && <span className="text-xs opacity-75 ml-1">(+${opt.price_mod})</span>}
-                                      </button>
-                                  )
-                              })}
-                          </div>
-                      </div>
-                  ))}
+          {/* Info Section */}
+          <div className="flex flex-col">
+            <div className="mb-6">
+              <span className="bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
+                {product.category}
+              </span>
+              <h1 className="text-3xl font-bold text-gray-900 mt-4 mb-2">{product.name}</h1>
+              <div className="flex items-center space-x-4">
+                <span className="text-3xl font-bold text-blue-600">
+                  {formatPrice(product.price)}
+                </span>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  isAvailable ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                }`}>
+                  {isAvailable 
+                    ? (lang === 'vi' ? 'Sẵn hàng' : 'In Stock') 
+                    : (lang === 'vi' ? 'Hết hàng' : 'Out of Stock')}
+                </span>
               </div>
-          )}
-          
-          <div className="prose max-w-none text-slate-600 mb-8 whitespace-pre-wrap border-t border-slate-100 pt-6 text-base leading-relaxed">
-            {displayDesc || (lang === 'en' ? "No description available." : "Chưa có mô tả chi tiết.")}
-          </div>
+            </div>
 
-          <div className="mt-auto space-y-4">
-            <div className="flex gap-4">
-              <button onClick={handleAddToCart} disabled={isOutOfStock || loadingStock} className="flex-1 bg-white border-2 border-blue-600 text-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                <ShoppingCart size={20}/> {t('THÊM GIỎ HÀNG', 'ADD TO CART')}
+            <div className="prose max-w-none text-gray-600 mb-8 flex-grow">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                {lang === 'vi' ? 'Mô tả sản phẩm' : 'Description'}
+              </h3>
+              <p className="whitespace-pre-line">{product.description}</p>
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button
+                onClick={handleAddToCart}
+                disabled={!isAvailable}
+                className={`flex-1 py-3 px-6 rounded-xl font-bold transition-all duration-200 ${
+                  isAvailable 
+                    ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 border-2 border-blue-600'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {adding 
+                  ? (lang === 'vi' ? 'Đã thêm!' : 'Added!') 
+                  : (lang === 'vi' ? 'Thêm vào giỏ' : 'Add to Cart')}
               </button>
-              <button onClick={handleBuyNow} disabled={isOutOfStock || loadingStock} className="flex-1 bg-red-600 text-white py-3.5 rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-200 transition flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
-                <CreditCard size={20}/> {t('MUA NGAY', 'BUY NOW')}
+              
+              <button
+                onClick={handleBuyNow}
+                disabled={!isAvailable}
+                className={`flex-1 py-3 px-6 rounded-xl font-bold text-white transition-all duration-200 shadow-lg ${
+                  isAvailable 
+                    ? 'bg-blue-600 hover:bg-blue-700 hover:shadow-blue-500/30'
+                    : 'bg-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {lang === 'vi' ? 'Mua ngay' : 'Buy Now'}
               </button>
             </div>
+            
+            {!isAvailable && (
+              <p className="text-red-500 text-sm mt-3 text-center">
+                {lang === 'vi' 
+                  ? 'Sản phẩm này tạm thời hết hàng.' 
+                  : 'This product is currently out of stock.'}
+              </p>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default ProductDetail;
