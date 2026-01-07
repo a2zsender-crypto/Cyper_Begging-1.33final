@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useLang } from '../context/LangContext';
-import { Mail, Phone, MapPin, Send, MessageSquare } from 'lucide-react';
+import { Mail, Phone, MapPin, Send } from 'lucide-react';
 import { toast } from 'react-toastify';
 import AdminContacts from '../components/admin/AdminContacts';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 export default function Contact() {
   const { t } = useLang();
@@ -16,20 +16,39 @@ export default function Contact() {
   
   // States để kiểm tra session và chuyển view
   const [session, setSession] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
+  
+  // [MỚI] Dùng URL để quản lý Tab (Chia tab)
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [showHistory, setShowHistory] = useState(false);
 
   // 1. Kiểm tra session
   useEffect(() => {
       supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
   }, []);
 
-  // 2. Logic TỰ ĐỘNG chuyển sang Tab Lịch sử nếu URL có ticketId
+  // 2. Logic TỰ ĐỘNG chuyển Tab dựa trên URL (Fix lỗi F5 và cache RAM)
   useEffect(() => {
-      if (searchParams.get('ticketId') && session) {
-          setShowHistory(true);
+      const ticketId = searchParams.get('ticketId');
+      const tab = searchParams.get('tab');
+
+      // Nếu có ticketId (từ thông báo) HOẶC tab=history -> Bật chế độ Lịch sử
+      if (ticketId || tab === 'history') {
+          if (session) setShowHistory(true);
+      } else {
+          setShowHistory(false);
       }
   }, [searchParams, session]);
+
+  // Hàm chuyển đổi Tab có cập nhật URL
+  const switchTab = (isHistory) => {
+      setShowHistory(isHistory);
+      if (isHistory) {
+          navigate('/contact?tab=history');
+      } else {
+          navigate('/contact'); // Mặc định là form
+      }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -54,7 +73,7 @@ export default function Contact() {
         setName(''); setEmail(''); setPhone(''); setMessage('');
         
         // Gửi xong chuyển sang tab lịch sử để xem
-        if (session) setShowHistory(true);
+        if (session) switchTab(true);
     } catch (error) {
         toast.error("Lỗi: " + error.message);
     } finally {
@@ -71,17 +90,17 @@ export default function Contact() {
             <h1 className="text-3xl md:text-4xl font-bold text-slate-800 mb-4">{t('Liên hệ & Hỗ trợ', 'Contact & Support')}</h1>
             <p className="text-slate-500 mb-6">{t('Chúng tôi luôn sẵn sàng hỗ trợ bạn 24/7.', 'We are here to help you 24/7.')}</p>
             
-            {/* Nút chuyển đổi giữa Form và Lịch sử */}
+            {/* Nút chuyển đổi giữa Form và Lịch sử (Cập nhật URL) */}
             {session && (
                 <div className="flex justify-center gap-4 bg-white p-1 rounded-xl shadow-sm inline-flex border border-gray-200">
                     <button 
-                        onClick={() => setShowHistory(false)}
+                        onClick={() => switchTab(false)}
                         className={`px-6 py-2 rounded-lg text-sm font-bold transition ${!showHistory ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
                     >
                         {t('Gửi yêu cầu mới', 'New Request')}
                     </button>
                     <button 
-                        onClick={() => setShowHistory(true)}
+                        onClick={() => switchTab(true)}
                         className={`px-6 py-2 rounded-lg text-sm font-bold transition ${showHistory ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
                     >
                         {t('Lịch sử hỗ trợ', 'Support History')}
@@ -93,7 +112,7 @@ export default function Contact() {
         {/* CONTENT AREA */}
         <div className="max-w-5xl mx-auto">
             {showHistory && session ? (
-                // VIEW 1: LỊCH SỬ HỖ TRỢ (AdminContacts)
+                // VIEW 1: LỊCH SỬ HỖ TRỢ (AdminContacts sẽ tự đọc URL ticketId để mở)
                 <AdminContacts session={session} role="user" />
             ) : (
                 // VIEW 2: FORM LIÊN HỆ
