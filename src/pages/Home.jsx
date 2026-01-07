@@ -1,164 +1,160 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { FiShoppingCart, FiArrowRight, FiCheck, FiX } from 'react-icons/fi';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import { useLang } from '../context/LangContext';
+import { Zap, Wallet, ShieldCheck, ShoppingBag, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Home() {
   const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
+  const { t, lang } = useLang();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchLatestProducts();
+    // Chỉ cần lấy từ bảng products, cột physical_stock đã được Trigger DB cập nhật chuẩn
+    supabase
+      .from('products')
+      .select('*')
+      .order('id', { ascending: false })
+      .limit(12) // Giới hạn số lượng hiển thị Home cho nhẹ
+      .then(({ data }) => setProducts(data || []));
   }, []);
 
-  const fetchLatestProducts = async () => {
-    try {
-      // Lấy products và sắp xếp mới nhất
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(8);
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Hàm kiểm tra còn hàng hay không để hiển thị UI
-  const checkAvailability = (product) => {
-    // 1. Nếu là API -> Luôn có hàng
-    if (product.get_key_api) return true;
-    // 2. Nếu không -> Check tồn kho vật lý (đã được SQL sync)
-    return (product.physical_stock > 0);
-  };
-
-  const handleAddToCart = (e, product) => {
-    e.preventDefault(); // Ngăn chặn chuyển hướng thẻ Link
-    if (!checkAvailability(product)) {
-      toast.error('Sản phẩm tạm hết hàng');
-      return;
-    }
-    // Mặc định chọn variant đầu tiên nếu có
-    const defaultVariant = product.variant_stocks && product.variant_stocks.length > 0
-      ? product.variant_stocks[0].options
-      : null;
+  // Hàm kiểm tra tình trạng kho (Chuẩn Logic)
+  const checkAvailability = (p) => {
+      // 1. Nếu là Digital & Có tích API -> Luôn sẵn hàng
+      if (p.is_digital && p.allow_external_key) return true;
       
-    addToCart(product, defaultVariant);
+      // 2. Còn lại kiểm tra số tồn kho vật lý (đã sync)
+      return (p.physical_stock > 0);
   };
+
+  const getStockLabel = (p) => {
+      if (p.is_digital && p.allow_external_key) return { text: t("Auto API", "Auto API"), color: "bg-blue-500" };
+      if (p.physical_stock > 0) return { text: `${t("Sẵn hàng", "In Stock")}: ${p.physical_stock}`, color: "bg-green-500" };
+      return { text: t("Hết hàng", "Out of Stock"), color: "bg-red-500" };
+  };
+
+  const handleAddToCart = (p) => {
+      if (!checkAvailability(p)) {
+          toast.error(t("Sản phẩm tạm hết hàng", "Out of Stock temporarily"));
+          return;
+      }
+      // Chọn variant đầu tiên nếu có làm mặc định
+      const defaultVariant = p.variants?.length > 0 && p.variant_stocks?.length > 0
+          ? p.variant_stocks[0].options 
+          : null;
+          
+      addToCart(p, defaultVariant);
+      toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart!"));
+  };
+
+  const handleBuyNow = (p) => {
+      if (!checkAvailability(p)) {
+          toast.error(t("Sản phẩm tạm hết hàng", "Out of Stock temporarily"));
+          return;
+      }
+      const defaultVariant = p.variants?.length > 0 && p.variant_stocks?.length > 0
+          ? p.variant_stocks[0].options 
+          : null;
+
+      addToCart(p, defaultVariant);
+      navigate('/cart');
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Hero Section - Giữ nguyên */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-20">
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold mb-6">
-            Giải Pháp Bản Quyền Số Tự Động
-          </h1>
-          <p className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
-            Cung cấp key bản quyền, tài khoản Premium và giải pháp phần mềm chất lượng cao. 
-            Nhận hàng ngay lập tức qua Email.
-          </p>
-          <Link 
-            to="/products" 
-            className="inline-flex items-center bg-white text-blue-700 px-8 py-3 rounded-full font-bold hover:bg-blue-50 transition-colors shadow-lg"
-          >
-            Xem Tất Cả Sản Phẩm
-            <FiArrowRight className="ml-2" />
-          </Link>
-        </div>
-      </div>
+    <div>
+      {/* === HERO SECTION === */}
+      <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
+        <div className="text-center max-w-3xl mx-auto px-4">
+            <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
+                {t('Mua sắm với', 'Shop with')} <span className="text-blue-600">Crypto</span>
+            </h1>
+            <p className="text-slate-500 text-lg mb-10 leading-relaxed">
+                {t(
+                    'Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.',
+                    'High quality digital and physical products with secure cryptocurrency payments via Oxapay.'
+                )}
+            </p>
 
-      {/* Latest Products Section */}
-      <div className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Sản Phẩm Mới Nhất</h2>
-        
-        {loading ? (
-          <div className="flex justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {products.map((product) => {
-              const isAvailable = checkAvailability(product);
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white flex-shrink-0"><Zap size={24} /></div>
+                    <div><h3 className="font-bold text-slate-800">{t('Giao hàng nhanh', 'Fast Delivery')}</h3><p className="text-xs text-slate-500">{t('Sản phẩm số tức thì', 'Instant digital items')}</p></div>
+                </div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600 flex-shrink-0"><Wallet size={24} /></div>
+                    <div><h3 className="font-bold text-slate-800">{t('Thanh toán Crypto', 'Crypto Payment')}</h3><p className="text-xs text-slate-500">USDT, BTC, ETH</p></div>
+                </div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0"><ShieldCheck size={24} /></div>
+                    <div><h3 className="font-bold text-slate-800">{t('Bảo mật cao', 'High Security')}</h3><p className="text-xs text-slate-500">{t('Giao dịch an toàn', 'Secure transactions')}</p></div>
+                </div>
+            </div>
+        </div>
+      </section>
+
+      {/* === PRODUCT LIST === */}
+      <h2 className="text-2xl font-bold mb-8 text-slate-800 flex items-center gap-2">
+          <ShoppingBag className="text-blue-600"/> {t('Sản phẩm mới nhất', 'Latest Products')}
+      </h2>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {products.map((p) => {
+          const isAvailable = checkAvailability(p);
+          const stockLabel = getStockLabel(p);
+
+          return (
+            <div key={p.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group h-full">
+              <Link to={`/products/${p.id}`} className="block relative">
+                <div className="aspect-[4/3] overflow-hidden bg-gray-100 relative">
+                  {p.images && p.images[0] ? (
+                    <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
+                  ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
+                  
+                  {/* Badge Tồn kho */}
+                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white shadow-sm flex items-center gap-1 ${stockLabel.color}`}>
+                     {isAvailable ? <Check size={10}/> : <X size={10}/>}
+                     {stockLabel.text}
+                  </div>
+
+                  {/* Badge Loại */}
+                  <div className="absolute top-2 left-2">
+                      {p.is_digital ? 
+                        <span className="text-[10px] bg-purple-600/90 text-white px-2 py-1 rounded font-bold backdrop-blur-sm shadow-sm">DIGITAL</span> :
+                        <span className="text-[10px] bg-orange-500/90 text-white px-2 py-1 rounded font-bold backdrop-blur-sm shadow-sm">PHYSICAL</span>
+                     }
+                  </div>
+                </div>
+              </Link>
               
-              return (
-                <Link 
-                  to={`/products/${product.id}`} 
-                  key={product.id}
-                  className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden group flex flex-col h-full"
-                >
-                  <div className="aspect-video bg-gray-100 relative overflow-hidden">
-                    <img 
-                      src={product.image_url || 'https://via.placeholder.com/400x225?text=No+Image'} 
-                      alt={product.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    
-                    {/* Badge Tình trạng kho */}
-                    <div className="absolute top-2 right-2">
-                      {isAvailable ? (
-                        <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center shadow-sm">
-                          <FiCheck className="mr-1" />
-                          {product.get_key_api ? 'Auto API' : 'Sẵn hàng'}
-                        </span>
-                      ) : (
-                        <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center shadow-sm">
-                          <FiX className="mr-1" />
-                          Hết hàng
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Badge Category */}
-                    <div className="absolute top-2 left-2">
-                      <span className="bg-black/50 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full">
-                        {product.category === 'software' ? 'Phần mềm' : 
-                         product.category === 'account' ? 'Tài khoản' : 'Vật lý'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-4 flex flex-col flex-grow">
-                    <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3rem]">
-                      {product.name}
-                    </h3>
-                    <div className="mt-auto flex items-center justify-between">
-                      <span className="text-blue-600 font-bold text-lg">
-                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
-                      </span>
-                      <button 
-                        onClick={(e) => handleAddToCart(e, product)}
-                        disabled={!isAvailable}
-                        className={`p-2 rounded-lg transition-colors ${
-                          isAvailable 
-                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        }`}
-                        title={isAvailable ? "Thêm vào giỏ" : "Hết hàng"}
-                      >
-                        <FiShoppingCart className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
+              <div className="p-4 flex flex-col flex-grow">
+                <Link to={`/products/${p.id}`}>
+                  <h3 className="font-bold text-slate-800 mb-1 hover:text-blue-600 transition line-clamp-2 min-h-[2.5rem]">
+                      {lang === 'vi' ? p.title : (p.title_en || p.title)}
+                  </h3>
                 </Link>
-              );
-            })}
-          </div>
-        )}
-        
-        <div className="text-center mt-12">
-          <Link to="/products" className="text-blue-600 font-medium hover:text-blue-700 hover:underline">
-            Xem thêm sản phẩm &rarr;
-          </Link>
-        </div>
+                
+                <div className="mt-auto pt-3 border-t border-slate-50">
+                  <div className="flex justify-between items-center mb-3">
+                     <span className="text-green-600 font-bold text-lg">{p.price} USDT</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                     <button onClick={() => handleAddToCart(p)} disabled={!isAvailable} className={`flex-1 py-2 rounded-lg font-medium transition text-sm border ${!isAvailable ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'}`}>
+                        {t('Thêm giỏ', 'Add Cart')}
+                     </button>
+                     <button onClick={() => handleBuyNow(p)} disabled={!isAvailable} className={`flex-1 py-2 rounded-lg font-bold transition text-sm shadow-sm ${!isAvailable ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                        {t('Mua ngay', 'Buy Now')}
+                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   );
