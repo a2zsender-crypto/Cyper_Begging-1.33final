@@ -18,7 +18,7 @@ const Products = () => {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      // Lấy thêm variants và variant_stocks để tính tồn kho chính xác
+      // Lấy đủ dữ liệu để tính toán
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -33,10 +33,10 @@ const Products = () => {
     }
   };
 
-  // --- HÀM TÍNH TỒN KHO CHUẨN XÁC ---
+  // --- LOGIC TÍNH TỒN KHO (CHỈ SỬA Ở ĐÂY) ---
   const calculateStock = (product) => {
-    // 1. Nếu cho phép lấy key qua API -> Luôn coi là còn hàng
-    if (product.allow_external_key) return 999;
+    // 1. Nếu cho phép lấy key ngoài -> Luôn báo còn hàng (trả về số lớn)
+    if (product.allow_external_key) return 9999;
 
     // 2. Nếu là sản phẩm vật lý -> Dùng kho vật lý
     if (!product.is_digital) {
@@ -44,12 +44,12 @@ const Products = () => {
     }
 
     // 3. Nếu là sản phẩm số (Digital Key)
-    // Ưu tiên 1: Cộng tổng tồn kho của các biến thể (nếu có)
+    // Cộng tổng tồn kho của các biến thể (nếu có)
     if (product.variant_stocks && Array.isArray(product.variant_stocks) && product.variant_stocks.length > 0) {
       return product.variant_stocks.reduce((total, v) => total + (Number(v.stock) || 0), 0);
     }
 
-    // Ưu tiên 2: Nếu không có biến thể, check kho vật lý (hoặc logic đếm key cũ nếu bạn dùng)
+    // Fallback: Nếu không có biến thể, check kho vật lý
     return product.physical_stock || 0;
   };
 
@@ -66,7 +66,7 @@ const Products = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header & Filter */}
+      {/* Header & Filter giữ nguyên */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <h1 className="text-3xl font-bold text-gray-900">Sản Phẩm</h1>
         
@@ -101,7 +101,7 @@ const Products = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map((product) => {
-            const stock = calculateStock(product); // Tính tồn kho
+            const stock = calculateStock(product);
             const isOutOfStock = stock <= 0;
             const hasVariants = product.variants && product.variants.length > 0;
 
@@ -113,19 +113,11 @@ const Products = () => {
                     alt={product.title}
                     className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
                   />
-                  {/* Badge Hết hàng */}
+                  {/* Badge Hết hàng (Giữ nguyên style cũ) */}
                   {isOutOfStock && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                       <span className="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wide">
                         Hết hàng
-                      </span>
-                    </div>
-                  )}
-                  {/* Badge API */}
-                  {product.allow_external_key && (
-                    <div className="absolute top-2 right-2">
-                       <span className="bg-blue-600 text-white px-2 py-0.5 rounded text-xs font-bold shadow-sm">
-                        AUTO API
                       </span>
                     </div>
                   )}
@@ -143,26 +135,21 @@ const Products = () => {
                       <span className="text-xl font-bold text-blue-600">
                         {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
                       </span>
-                      {/* Hiển thị tồn kho nhỏ */}
-                      {!product.allow_external_key && (
-                         <p className={`text-xs mt-1 ${isOutOfStock ? 'text-red-500' : 'text-green-600'}`}>
-                           {isOutOfStock ? 'Tạm hết hàng' : `Còn lại: ${stock}`}
-                         </p>
-                      )}
+                      {/* Hiển thị dòng trạng thái kho (Giữ nguyên text) */}
+                      <p className={`text-xs mt-1 ${isOutOfStock ? 'text-red-500' : 'text-green-600'}`}>
+                         {isOutOfStock ? 'Tạm hết hàng' : `Còn lại: ${stock > 999 ? '999+' : stock}`}
+                      </p>
                     </div>
 
                     {/* Nút Mua hàng */}
                     {hasVariants ? (
-                      // Nếu có biến thể -> Bắt buộc vào trang chi tiết để chọn
                       <Link
                         to={`/products/${product.id}`}
                         className="p-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-blue-600 transition-colors"
-                        title="Chọn phân loại"
                       >
                         <Filter className="w-5 h-5" />
                       </Link>
                     ) : (
-                      // Nếu không có biến thể -> Mua ngay được (trừ khi hết hàng)
                       <button
                         onClick={() => addToCart(product)}
                         disabled={isOutOfStock}
@@ -171,7 +158,6 @@ const Products = () => {
                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg'
                         }`}
-                        title={isOutOfStock ? "Hết hàng" : "Thêm vào giỏ"}
                       >
                         <ShoppingCart className="w-5 h-5" />
                       </button>
