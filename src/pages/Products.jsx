@@ -1,203 +1,255 @@
-import { useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingBag, Search, Zap, Box, Package, Layers, Loader } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { toast } from 'react-toastify';
+import { toast } from 'react-hot-toast';
 
-export default function Products() {
-  const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState('all');
+const Products = () => {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('All');
   
   const { addToCart } = useCart();
-  const { t, lang } = useLang();
-  const navigate = useNavigate();
+  const { t, language } = useLang();
 
-  // 1. Dùng React Query để lấy Sản phẩm
-  const { data: products = [], isLoading: loadingProducts } = useQuery({
-    queryKey: ['public-products'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('products').select('*').order('id', { ascending: false });
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      // Lấy thêm các trường variants và variant_stocks để tính tồn kho
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+
       if (error) throw error;
-      return data;
+      setProducts(data || []);
+
+      // Tách category từ variants (nếu bạn dùng logic category cũ)
+      // Hoặc nếu chưa có bảng category riêng thì tạm thời để logic lọc cơ bản
+      const uniqueCats = ['All', ...new Set(data.map(p => p.category || 'Other'))];
+      // Nếu không có cột category trong bảng products thì đoạn trên có thể bỏ qua hoặc sửa lại
+      // Ở đây tôi giả định chưa có cột category, chỉ hiển thị All
+      setCategories(['All']); 
+      
+    } catch (error) {
+      console.error('Error fetching products:', error.message);
+      toast.error(t('error_fetching_products'));
+    } finally {
+      setLoading(false);
     }
-  });
-
-  // 2. Dùng React Query để lấy Tồn kho
-  const { data: stocks = {} } = useQuery({
-    queryKey: ['public-stock'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('product_stock').select('*');
-      if (error) throw error;
-      const map = {};
-      data?.forEach(s => map[s.product_id] = s.stock_count);
-      return map;
-    }
-  });
-
-  const filteredProducts = useMemo(() => {
-      return products.filter(p => {
-          const matchesSearch = (p.title + (p.title_en || '')).toLowerCase().includes(search.toLowerCase());
-          const matchesType = filterType === 'all' 
-              ? true 
-              : filterType === 'digital' ? p.is_digital : !p.is_digital;
-          return matchesSearch && matchesType;
-      });
-  }, [products, search, filterType]);
-
-  const handleAddToCart = (p) => {
-      addToCart(p);
-      toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
-  const handleBuyNow = (p) => {
-      if (p.variants && p.variants.length > 0) {
-          navigate(`/product/${p.id}`);
-      } else {
-          addToCart(p);
-          navigate('/cart');
+  // --- HÀM TÍNH TỒN KHO CHUẨN XÁC ---
+  const getProductStockStatus = (product) => {
+    // 1. Nếu cho phép lấy key qua API (Auto Restock) -> Luôn coi là CÒN HÀNG (vô tận)
+    if (product.allow_external_key) {
+      return { totalStock: 9999, inStock: true };
+    }
+
+    let totalStock = 0;
+
+    // 2. Tính tổng tồn kho từ các biến thể (nếu có)
+    // variant_stocks cấu trúc: [{ options: {...}, stock: 10 }, ...]
+    if (product.variants && product.variants.length > 0 && product.variant_stocks) {
+      let vStocks = product.variant_stocks;
+      // Parse JSON nếu nó bị trả về dạng chuỗi (đề phòng)
+      if (typeof vStocks === 'string') {
+        try { vStocks = JSON.parse(vStocks); } catch (e) { vStocks = []; }
       }
+      
+      if (Array.isArray(vStocks)) {
+        totalStock = vStocks.reduce((sum, item) => sum + (Number(item.stock) || 0), 0);
+      }
+    } 
+    // 3. Nếu không có biến thể, lấy physical_stock gốc
+    else {
+      totalStock = Number(product.physical_stock) || 0;
+    }
+
+    return { 
+      totalStock, 
+      inStock: totalStock > 0 
+    };
+  };
+
+  // Xử lý thêm vào giỏ hàng ngay tại trang danh sách
+  const handleAddToCart = (e, product) => {
+    e.preventDefault(); // Ngăn chặn nhảy vào trang chi tiết
+    e.stopPropagation();
+
+    const { inStock } = getProductStockStatus(product);
+
+    // KIỂM TRA TỒN KHO NGHIÊM NGẶT
+    if (!inStock) {
+      toast.error(language === 'vi' ? 'Sản phẩm đã hết hàng!' : 'Product out of stock!');
+      return; // Dừng ngay, không gọi addToCart
+    }
+
+    // Nếu có biến thể, ta cần redirect người dùng vào trang chi tiết để chọn biến thể
+    // Thay vì add thẳng (vì chưa biết chọn màu nào, size nào)
+    if (product.variants && product.variants.length > 0) {
+      toast(language === 'vi' ? 'Vui lòng chọn phân loại!' : 'Please select options!', {
+        icon: '👆',
+      });
+      // Logic điều hướng sẽ do thẻ Link bao ngoài xử lý, 
+      // nhưng ở đây ta return để không add item "trống option" vào giỏ.
+      return;
+    }
+
+    // Nếu là sp đơn giản (không biến thể) và còn hàng -> Add luôn
+    addToCart(product);
+    // Lưu ý: Nếu CartContext đã có toast success thì dòng dưới có thể bỏ để đỡ bị duplicate toast
+    // toast.success(t('added_to_cart')); 
+  };
+
+  const filteredProducts = selectedCategory === 'All' 
+    ? products 
+    : products.filter(p => p.category === selectedCategory);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
-  if (loadingProducts) return (
-      <div className="flex justify-center items-center h-screen text-blue-600">
-          <Loader className="animate-spin w-10 h-10"/>
-      </div>
-  );
-
   return (
-    <div className="pb-10">
-      
-      {/* HERO BANNER */}
-      <section className="py-14 mb-10 bg-gradient-to-b from-blue-50 to-white rounded-3xl border border-blue-50/50">
-        <div className="text-center max-w-2xl mx-auto px-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold mb-4">
-                <Package size={14}/> {t('Kho hàng chính hãng', 'Official Inventory')}
-            </div>
-            <h1 className="text-4xl font-extrabold text-slate-800 mb-4">
-                {t('Khám phá', 'Explore')} <span className="text-blue-600">CryptoShop</span>
-            </h1>
-            <p className="text-slate-500 text-lg">
-                {t('Tìm kiếm sản phẩm số và vật lý chất lượng cao. Thanh toán nhanh chóng, an toàn.', 'Find high-quality digital and physical products. Fast, safe, and secure payment.')}
-            </p>
-        </div>
-      </section>
-
-      {/* TOOLBAR */}
-      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm sticky top-20 z-30">
-          <div className="flex items-center gap-2">
-              <Layers className="text-blue-600"/>
-              <h2 className="font-bold text-slate-700 text-lg">
-                  {t('Tất cả sản phẩm', 'All Products')} <span className="text-slate-400 text-sm font-normal">({filteredProducts.length})</span>
-              </h2>
-          </div>
-
-          <div className="flex gap-3 w-full md:w-auto">
-              <div className="relative flex-1 md:w-72">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                  <input 
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition bg-slate-50 focus:bg-white"
-                    placeholder={t('Tìm tên sản phẩm...', 'Search products...')}
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-              </div>
-              <select 
-                className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer font-medium text-slate-600"
-                value={filterType}
-                onChange={e => setFilterType(e.target.value)}
+    <div className="container mx-auto px-4 py-8">
+      {/* Header & Filter */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-800 mb-4 md:mb-0">
+          {language === 'vi' ? 'Sản phẩm mới' : 'Latest Products'}
+        </h1>
+        
+        {/* Nếu bạn có category thì hiển thị, không thì ẩn hoặc giữ nguyên logic lọc */}
+        {categories.length > 1 && (
+          <div className="flex space-x-2 overflow-x-auto pb-2">
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  selectedCategory === cat
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
               >
-                  <option value="all">{t('Tất cả loại', 'All Types')}</option>
-                  <option value="digital">Digital (Key)</option>
-                  <option value="physical">Physical (Ship)</option>
-              </select>
+                {cat}
+              </button>
+            ))}
           </div>
+        )}
       </div>
 
-      {/* GRID */}
-      {filteredProducts.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {filteredProducts.map((p) => {
-              const stock = stocks[p.id] || 0;
-              const hasVariants = p.variants && Array.isArray(p.variants) && p.variants.length > 0;
-              
-              // LOGIC MỚI: Coi là có hàng nếu còn stock HOẶC cho phép lấy key API
-              const isAvailable = stock > 0 || p.allow_external_key;
+      {/* Product Grid */}
+      {filteredProducts.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500 text-lg">
+            {language === 'vi' ? 'Chưa có sản phẩm nào.' : 'No products found.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {filteredProducts.map((product) => {
+            const { inStock, totalStock } = getProductStockStatus(product);
+            const hasVariants = product.variants && product.variants.length > 0;
 
-              return (
-                <div key={p.id} className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
-                  <Link to={`/product/${p.id}`} className="relative block h-52 overflow-hidden bg-gray-100">
-                      {p.images && p.images[0] ? (
-                        <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
-                      ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
-                      
-                      <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
-                          {/* BADGE TRẠNG THÁI HÀNG HOÁ */}
-                          <span className={`px-2.5 py-1 text-[10px] font-bold rounded-lg text-white shadow-sm ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`}>
-                             {stock > 0 
-                                ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` 
-                                : (p.allow_external_key ? t('Sẵn hàng', 'In Stock') : t('Hết hàng', 'Out of Stock'))
-                             }
-                          </span>
-                          
-                          {p.is_digital ? 
-                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-purple-600 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Zap size={10}/> DIGITAL</span> :
-                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-500 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Box size={10}/> PHYSIC</span>
-                          }
-                      </div>
-                  </Link>
-                  
-                  <div className="p-5 flex flex-col flex-grow">
-                    <Link to={`/product/${p.id}`}>
-                      <h3 className="font-bold text-base mb-2 text-slate-800 hover:text-blue-600 transition line-clamp-2 min-h-[3rem]">
-                          {lang === 'vi' ? p.title : (p.title_en || p.title)}
-                      </h3>
-                    </Link>
-                    
-                    <div className="mt-auto pt-2">
-                      <div className="flex justify-between items-center mb-4">
-                         <span className="text-green-600 font-extrabold text-xl">{p.price} USDT</span>
-                         
-                         {/* DỊCH CHỮ MANY OPTIONS */}
-                         {hasVariants && (
-                             <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-medium">
-                                 {t('Nhiều tùy chọn', 'Many options')}
-                             </span>
-                         )}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                         {hasVariants ? (
-                             <Link to={`/product/${p.id}`} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs flex items-center justify-center">
-                                {t('Tùy chọn', 'Options')}
-                             </Link>
-                         ) : (
-                             <button onClick={() => handleAddToCart(p)} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs">
-                                {t('Thêm giỏ', 'Add Cart')}
-                             </button>
-                         )}
-
-                         <button onClick={() => handleBuyNow(p)} disabled={!isAvailable} className="bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-xs shadow-blue-200">
-                            {t('Mua ngay', 'Buy Now')}
-                         </button>
-                      </div>
+            return (
+              <Link 
+                to={`/products/${product.id}`} 
+                key={product.id}
+                className="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden border border-gray-100 flex flex-col"
+              >
+                {/* Image Container */}
+                <div className="relative aspect-square overflow-hidden bg-gray-50">
+                  {product.images && product.images.length > 0 ? (
+                    <img
+                      src={product.images[0]}
+                      alt={product.title}
+                      className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-300">
+                      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
                     </div>
+                  )}
+                  
+                  {/* Badges */}
+                  <div className="absolute top-2 left-2 flex flex-col gap-1">
+                    {product.is_digital && (
+                      <span className="bg-blue-500/90 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
+                        Digital
+                      </span>
+                    )}
+                    {!inStock && (
+                      <span className="bg-red-500/90 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
+                        {language === 'vi' ? 'Hết hàng' : 'Out of Stock'}
+                      </span>
+                    )}
                   </div>
                 </div>
-              )
-            })}
-          </div>
-      ) : (
-          <div className="text-center py-24 bg-white rounded-3xl border border-slate-100">
-              <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-400">
-                  <Search size={40}/>
-              </div>
-              <h3 className="text-xl font-bold text-slate-700 mb-2">{t('Không tìm thấy sản phẩm', 'No products found')}</h3>
-              <p className="text-slate-500">{t('Thử tìm kiếm với từ khóa khác xem sao.', 'Try searching with different keywords.')}</p>
-          </div>
+
+                {/* Content */}
+                <div className="p-4 flex flex-col flex-grow">
+                  <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                    {language === 'vi' ? product.title : (product.title_en || product.title)}
+                  </h3>
+                  
+                  {/* Stock Status Text */}
+                  <div className="text-xs mb-3">
+                     {inStock ? (
+                        <span className="text-green-600 flex items-center">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5"></span>
+                          {product.allow_external_key 
+                            ? (language === 'vi' ? 'Luôn sẵn hàng (Auto)' : 'Always Available') 
+                            : (language === 'vi' ? `Còn ${totalStock} sản phẩm` : `${totalStock} in stock`)}
+                        </span>
+                     ) : (
+                        <span className="text-red-500 flex items-center">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5"></span>
+                          {language === 'vi' ? 'Tạm hết hàng' : 'Out of Stock'}
+                        </span>
+                     )}
+                  </div>
+
+                  <div className="mt-auto flex items-center justify-between">
+                    <span className="text-lg font-bold text-blue-600">
+                      ${Number(product.price).toLocaleString()}
+                    </span>
+                    
+                    {/* Add to Cart Button */}
+                    <button
+                      onClick={(e) => handleAddToCart(e, product)}
+                      disabled={!inStock}
+                      className={`p-2 rounded-lg transition-colors ${
+                        inStock
+                          ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                      title={inStock ? t('add_to_cart') : t('out_of_stock')}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       )}
     </div>
   );
-}
+};
+
+export default Products;
