@@ -1,135 +1,97 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
-import toast from 'react-hot-toast';
+import { createContext, useState, useContext, useEffect } from 'react';
+import { toast } from 'react-toastify'; 
+import { useLang } from './LangContext'; 
 
 const CartContext = createContext();
 
-export const useCart = () => useContext(CartContext);
+export function CartProvider({ children }) {
+  const { t } = useLang(); 
 
-export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState(() => {
-    const savedCart = localStorage.getItem('cart');
-    return savedCart ? JSON.parse(savedCart) : [];
+    const saved = localStorage.getItem('cart');
+    return saved ? JSON.parse(saved) : [];
   });
-  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Hàm kiểm tra tồn kho (Logic mới: Sử dụng RPC hoặc check field có sẵn)
-  const checkStock = async (product, variant = null) => {
-    try {
-      // Nếu là sản phẩm Get Key API -> Luôn có hàng
-      if (product.get_key_api) return true;
-
-      // Nếu là sản phẩm vật lý -> Check physical_stock có sẵn (đã được trigger SQL cập nhật)
-      if (!product.is_digital) {
-        if (variant) {
-           // Tìm stock của variant trong mảng variant_stocks
-           const variantItem = product.variant_stocks?.find(v => v.options.value === variant.value);
-           return variantItem ? variantItem.stock > 0 : false;
-        }
-        return product.physical_stock > 0;
-      }
-
-      // Nếu là sản phẩm Digital -> Gọi hàm RPC an toàn (thay vì query bảng keys)
-      const { data: stockCount, error } = await supabase
-        .rpc('get_available_stock', { 
-          p_product_id: product.id,
-          p_variant_name: variant ? variant.value : ''
-        });
-
-      if (error) {
-        console.error('Stock check error:', error);
-        return false;
-      }
-
-      return stockCount > 0;
-    } catch (error) {
-      console.error('Check stock error:', error);
-      return false;
-    }
+  // Tạo ID duy nhất cho sản phẩm + biến thể
+  const generateCartItemId = (product) => {
+    const variantKey = product.selectedVariants 
+      ? JSON.stringify(product.selectedVariants) 
+      : '';
+    return `${product.id}-${variantKey}`;
   };
 
-  const addToCart = async (product, variant = null) => {
-    // 1. Kiểm tra tồn kho trước khi thêm
-    const isAvailable = await checkStock(product, variant);
-    
-    if (!isAvailable) {
-      toast.error('Sản phẩm đã hết hàng hoặc không đủ số lượng!');
-      return;
-    }
-
+  const addToCart = (product) => {
     setCart(prev => {
-      // Tạo ID duy nhất cho item trong giỏ (kết hợp ID sp và variant)
-      const cartItemId = variant 
-        ? `${product.id}-${variant.value}`
-        : `${product.id}`;
-
-      const existingItem = prev.find(item => item.cartItemId === cartItemId);
-
-      if (existingItem) {
-        toast.success('Đã cập nhật số lượng trong giỏ!');
-        return prev.map(item =>
-          item.cartItemId === cartItemId
-            ? { ...item, quantity: item.quantity + 1 }
+      const cartItemId = generateCartItemId(product);
+      // Tìm theo cartItemId để chính xác với biến thể
+      const exist = prev.find(item => (item.cartItemId || generateCartItemId(item)) === cartItemId);
+      
+      const limit = product.allow_external_key ? 999999 : (product.maxStock || 0);
+      
+      if (exist) {
+        if (exist.quantity + 1 > limit) {
+            toast.error(t(`Chỉ còn ${limit} sản phẩm trong kho!`, `Only ${limit} items left in stock!`));
+            return prev;
+        }
+        return prev.map(item => 
+          (item.cartItemId || generateCartItemId(item)) === cartItemId 
+            ? { ...item, quantity: item.quantity + 1 } 
             : item
         );
       }
 
-      toast.success('Đã thêm vào giỏ hàng!');
-      return [...prev, {
-        ...product,
-        cartItemId,
-        selectedVariant: variant,
-        quantity: 1
-      }];
+      if (1 > limit) {
+          toast.error(t("Sản phẩm đã hết hàng!", "Product is out of stock!"));
+          return prev;
+      }
+
+      // Lưu luôn cartItemId vào item để dễ truy xuất sau này
+      return [...prev, { ...product, quantity: 1, cartItemId }];
     });
-    
-    setIsOpen(true);
+  };
+
+  // SỬA: Nhận 'quantity' là số lượng mới mong muốn (absolute value), không phải delta
+  const updateQuantity = (cartItemId, quantity) => {
+    setCart(prev => prev.map(item => {
+      const currentId = item.cartItemId || generateCartItemId(item);
+      
+      if (currentId === cartItemId) {
+        // Kiểm tra tồn kho
+        const limit = item.allow_external_key ? 999999 : (item.maxStock || 0);
+        
+        if (quantity > limit) {
+            toast.warn(t(`Kho chỉ còn ${limit} sản phẩm này.`, `Only ${limit} items of this product left.`));
+            // Trả về item cũ, không update
+            return item; 
+        }
+
+        // Cập nhật số lượng mới (nếu > 0)
+        return quantity > 0 ? { ...item, quantity: quantity } : item;
+      }
+      return item;
+    }));
   };
 
   const removeFromCart = (cartItemId) => {
-    setCart(prev => prev.filter(item => item.cartItemId !== cartItemId));
-    toast.success('Đã xóa sản phẩm khỏi giỏ!');
+    setCart(prev => prev.filter(item => {
+      const currentId = item.cartItemId || generateCartItemId(item);
+      return currentId !== cartItemId;
+    }));
   };
 
-  const updateQuantity = (cartItemId, newQuantity) => {
-    if (newQuantity < 1) return;
-    setCart(prev => prev.map(item => 
-      item.cartItemId === cartItemId 
-        ? { ...item, quantity: newQuantity }
-        : item
-    ));
-  };
-
-  const clearCart = () => {
-    setCart([]);
-    localStorage.removeItem('cart');
-  };
-
-  const getCartTotal = () => {
-    return cart.reduce((total, item) => {
-      const price = item.selectedVariant 
-        ? parseInt(item.selectedVariant.value.replace(/\D/g, ''))
-        : item.price;
-      return total + (price * item.quantity);
-    }, 0);
-  };
+  const clearCart = () => setCart([]);
+  
+  const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   return (
-    <CartContext.Provider value={{
-      cart,
-      isOpen,
-      setIsOpen,
-      addToCart,
-      removeFromCart,
-      updateQuantity,
-      clearCart,
-      getCartTotal
-    }}>
+    <CartContext.Provider value={{ cart, addToCart, removeFromCart, clearCart, updateQuantity, totalAmount }}>
       {children}
     </CartContext.Provider>
   );
-};
+}
+
+export const useCart = () => useContext(CartContext);
