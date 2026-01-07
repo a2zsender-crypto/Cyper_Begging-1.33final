@@ -1,18 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { useLang } from '../context/LangContext';
-import { toast } from 'react-hot-toast';
+import { ShoppingCart, Search, Filter } from 'lucide-react';
 
 const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState('all'); // all, digital, physical
   const { addToCart } = useCart();
-  const { t, language } = useLang();
 
   useEffect(() => {
     fetchProducts();
@@ -21,7 +18,7 @@ const Products = () => {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      // Lấy thêm các trường variants và variant_stocks để tính tồn kho
+      // Lấy thêm variants và variant_stocks để tính tồn kho chính xác
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -29,221 +26,159 @@ const Products = () => {
 
       if (error) throw error;
       setProducts(data || []);
-
-      // Tách category từ variants (nếu bạn dùng logic category cũ)
-      // Hoặc nếu chưa có bảng category riêng thì tạm thời để logic lọc cơ bản
-      const uniqueCats = ['All', ...new Set(data.map(p => p.category || 'Other'))];
-      // Nếu không có cột category trong bảng products thì đoạn trên có thể bỏ qua hoặc sửa lại
-      // Ở đây tôi giả định chưa có cột category, chỉ hiển thị All
-      setCategories(['All']); 
-      
     } catch (error) {
-      console.error('Error fetching products:', error.message);
-      toast.error(t('error_fetching_products'));
+      console.error('Error fetching products:', error);
     } finally {
       setLoading(false);
     }
   };
 
   // --- HÀM TÍNH TỒN KHO CHUẨN XÁC ---
-  const getProductStockStatus = (product) => {
-    // 1. Nếu cho phép lấy key qua API (Auto Restock) -> Luôn coi là CÒN HÀNG (vô tận)
-    if (product.allow_external_key) {
-      return { totalStock: 9999, inStock: true };
+  const calculateStock = (product) => {
+    // 1. Nếu cho phép lấy key qua API -> Luôn coi là còn hàng
+    if (product.allow_external_key) return 999;
+
+    // 2. Nếu là sản phẩm vật lý -> Dùng kho vật lý
+    if (!product.is_digital) {
+      return product.physical_stock || 0;
     }
 
-    let totalStock = 0;
-
-    // 2. Tính tổng tồn kho từ các biến thể (nếu có)
-    // variant_stocks cấu trúc: [{ options: {...}, stock: 10 }, ...]
-    if (product.variants && product.variants.length > 0 && product.variant_stocks) {
-      let vStocks = product.variant_stocks;
-      // Parse JSON nếu nó bị trả về dạng chuỗi (đề phòng)
-      if (typeof vStocks === 'string') {
-        try { vStocks = JSON.parse(vStocks); } catch (e) { vStocks = []; }
-      }
-      
-      if (Array.isArray(vStocks)) {
-        totalStock = vStocks.reduce((sum, item) => sum + (Number(item.stock) || 0), 0);
-      }
-    } 
-    // 3. Nếu không có biến thể, lấy physical_stock gốc
-    else {
-      totalStock = Number(product.physical_stock) || 0;
+    // 3. Nếu là sản phẩm số (Digital Key)
+    // Ưu tiên 1: Cộng tổng tồn kho của các biến thể (nếu có)
+    if (product.variant_stocks && Array.isArray(product.variant_stocks) && product.variant_stocks.length > 0) {
+      return product.variant_stocks.reduce((total, v) => total + (Number(v.stock) || 0), 0);
     }
 
-    return { 
-      totalStock, 
-      inStock: totalStock > 0 
-    };
+    // Ưu tiên 2: Nếu không có biến thể, check kho vật lý (hoặc logic đếm key cũ nếu bạn dùng)
+    return product.physical_stock || 0;
   };
 
-  // Xử lý thêm vào giỏ hàng ngay tại trang danh sách
-  const handleAddToCart = (e, product) => {
-    e.preventDefault(); // Ngăn chặn nhảy vào trang chi tiết
-    e.stopPropagation();
-
-    const { inStock } = getProductStockStatus(product);
-
-    // KIỂM TRA TỒN KHO NGHIÊM NGẶT
-    if (!inStock) {
-      toast.error(language === 'vi' ? 'Sản phẩm đã hết hàng!' : 'Product out of stock!');
-      return; // Dừng ngay, không gọi addToCart
-    }
-
-    // Nếu có biến thể, ta cần redirect người dùng vào trang chi tiết để chọn biến thể
-    // Thay vì add thẳng (vì chưa biết chọn màu nào, size nào)
-    if (product.variants && product.variants.length > 0) {
-      toast(language === 'vi' ? 'Vui lòng chọn phân loại!' : 'Please select options!', {
-        icon: '👆',
-      });
-      // Logic điều hướng sẽ do thẻ Link bao ngoài xử lý, 
-      // nhưng ở đây ta return để không add item "trống option" vào giỏ.
-      return;
-    }
-
-    // Nếu là sp đơn giản (không biến thể) và còn hàng -> Add luôn
-    addToCart(product);
-    // Lưu ý: Nếu CartContext đã có toast success thì dòng dưới có thể bỏ để đỡ bị duplicate toast
-    // toast.success(t('added_to_cart')); 
-  };
-
-  const filteredProducts = selectedCategory === 'All' 
-    ? products 
-    : products.filter(p => p.category === selectedCategory);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
+  // Lọc sản phẩm
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filter === 'all' 
+      ? true 
+      : filter === 'digital' 
+        ? product.is_digital 
+        : !product.is_digital;
+    return matchesSearch && matchesFilter;
+  });
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header & Filter */}
-      <div className="flex flex-col md:flex-row justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4 md:mb-0">
-          {language === 'vi' ? 'Sản phẩm mới' : 'Latest Products'}
-        </h1>
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+        <h1 className="text-3xl font-bold text-gray-900">Sản Phẩm</h1>
         
-        {/* Nếu bạn có category thì hiển thị, không thì ẩn hoặc giữ nguyên logic lọc */}
-        {categories.length > 1 && (
-          <div className="flex space-x-2 overflow-x-auto pb-2">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  selectedCategory === cat
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+        <div className="flex w-full md:w-auto gap-4">
+          <div className="relative flex-grow md:flex-grow-0">
+            <input
+              type="text"
+              placeholder="Tìm kiếm..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full"
+            />
+            <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
           </div>
-        )}
+          
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="pl-4 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
+          >
+            <option value="all">Tất cả</option>
+            <option value="digital">Sản phẩm số</option>
+            <option value="physical">Sản phẩm vật lý</option>
+          </select>
+        </div>
       </div>
 
-      {/* Product Grid */}
-      {filteredProducts.length === 0 ? (
+      {loading ? (
         <div className="text-center py-12">
-          <p className="text-gray-500 text-lg">
-            {language === 'vi' ? 'Chưa có sản phẩm nào.' : 'No products found.'}
-          </p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map((product) => {
-            const { inStock, totalStock } = getProductStockStatus(product);
+            const stock = calculateStock(product); // Tính tồn kho
+            const isOutOfStock = stock <= 0;
             const hasVariants = product.variants && product.variants.length > 0;
 
             return (
-              <Link 
-                to={`/products/${product.id}`} 
-                key={product.id}
-                className="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden border border-gray-100 flex flex-col"
-              >
-                {/* Image Container */}
-                <div className="relative aspect-square overflow-hidden bg-gray-50">
-                  {product.images && product.images.length > 0 ? (
-                    <img
-                      src={product.images[0]}
-                      alt={product.title}
-                      className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-300">
-                      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
+              <div key={product.id} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col h-full border border-gray-100">
+                <Link to={`/products/${product.id}`} className="block relative aspect-video overflow-hidden bg-gray-100">
+                   <img
+                    src={product.images?.[0] || 'https://via.placeholder.com/300x200?text=No+Image'}
+                    alt={product.title}
+                    className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
+                  />
+                  {/* Badge Hết hàng */}
+                  {isOutOfStock && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      <span className="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wide">
+                        Hết hàng
+                      </span>
                     </div>
                   )}
-                  
-                  {/* Badges */}
-                  <div className="absolute top-2 left-2 flex flex-col gap-1">
-                    {product.is_digital && (
-                      <span className="bg-blue-500/90 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
-                        Digital
+                  {/* Badge API */}
+                  {product.allow_external_key && (
+                    <div className="absolute top-2 right-2">
+                       <span className="bg-blue-600 text-white px-2 py-0.5 rounded text-xs font-bold shadow-sm">
+                        AUTO API
                       </span>
-                    )}
-                    {!inStock && (
-                      <span className="bg-red-500/90 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
-                        {language === 'vi' ? 'Hết hàng' : 'Out of Stock'}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  )}
+                </Link>
 
-                {/* Content */}
                 <div className="p-4 flex flex-col flex-grow">
-                  <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                    {language === 'vi' ? product.title : (product.title_en || product.title)}
-                  </h3>
+                  <Link to={`/products/${product.id}`} className="hover:text-blue-600 transition-colors">
+                    <h3 className="text-lg font-semibold text-gray-900 line-clamp-2 mb-2 min-h-[3.5rem]">
+                      {product.title}
+                    </h3>
+                  </Link>
                   
-                  {/* Stock Status Text */}
-                  <div className="text-xs mb-3">
-                     {inStock ? (
-                        <span className="text-green-600 flex items-center">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5"></span>
-                          {product.allow_external_key 
-                            ? (language === 'vi' ? 'Luôn sẵn hàng (Auto)' : 'Always Available') 
-                            : (language === 'vi' ? `Còn ${totalStock} sản phẩm` : `${totalStock} in stock`)}
-                        </span>
-                     ) : (
-                        <span className="text-red-500 flex items-center">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5"></span>
-                          {language === 'vi' ? 'Tạm hết hàng' : 'Out of Stock'}
-                        </span>
-                     )}
-                  </div>
+                  <div className="mt-auto pt-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-xl font-bold text-blue-600">
+                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
+                      </span>
+                      {/* Hiển thị tồn kho nhỏ */}
+                      {!product.allow_external_key && (
+                         <p className={`text-xs mt-1 ${isOutOfStock ? 'text-red-500' : 'text-green-600'}`}>
+                           {isOutOfStock ? 'Tạm hết hàng' : `Còn lại: ${stock}`}
+                         </p>
+                      )}
+                    </div>
 
-                  <div className="mt-auto flex items-center justify-between">
-                    <span className="text-lg font-bold text-blue-600">
-                      ${Number(product.price).toLocaleString()}
-                    </span>
-                    
-                    {/* Add to Cart Button */}
-                    <button
-                      onClick={(e) => handleAddToCart(e, product)}
-                      disabled={!inStock}
-                      className={`p-2 rounded-lg transition-colors ${
-                        inStock
-                          ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      }`}
-                      title={inStock ? t('add_to_cart') : t('out_of_stock')}
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                    </button>
+                    {/* Nút Mua hàng */}
+                    {hasVariants ? (
+                      // Nếu có biến thể -> Bắt buộc vào trang chi tiết để chọn
+                      <Link
+                        to={`/products/${product.id}`}
+                        className="p-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-blue-600 transition-colors"
+                        title="Chọn phân loại"
+                      >
+                        <Filter className="w-5 h-5" />
+                      </Link>
+                    ) : (
+                      // Nếu không có biến thể -> Mua ngay được (trừ khi hết hàng)
+                      <button
+                        onClick={() => addToCart(product)}
+                        disabled={isOutOfStock}
+                        className={`p-2 rounded-full transition-colors ${
+                          isOutOfStock
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg'
+                        }`}
+                        title={isOutOfStock ? "Hết hàng" : "Thêm vào giỏ"}
+                      >
+                        <ShoppingCart className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>
