@@ -1,190 +1,203 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { FiSearch, FiFilter, FiShoppingCart, FiCheck, FiX } from 'react-icons/fi';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import toast from 'react-hot-toast';
+import { ShoppingBag, Search, Zap, Box, Package, Layers, Loader } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { toast } from 'react-toastify';
 
 export default function Products() {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('all');
+  
   const { addToCart } = useCart();
   const { t, lang } = useLang();
-  
-  const categoryFilter = searchParams.get('category') || 'all';
-  const searchQuery = searchParams.get('search') || '';
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchProducts();
-  }, [categoryFilter, searchQuery]);
-
-  const fetchProducts = async () => {
-    try {
-      setLoading(true);
-      let query = supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (categoryFilter !== 'all') {
-        query = query.eq('category', categoryFilter);
-      }
-
-      if (searchQuery) {
-        query = query.ilike('name', `%${searchQuery}%`); // Hoặc 'title' tùy DB của bạn
-      }
-
-      const { data, error } = await query;
-
+  // 1. Dùng React Query để lấy Sản phẩm
+  const { data: products = [], isLoading: loadingProducts } = useQuery({
+    queryKey: ['public-products'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('products').select('*').order('id', { ascending: false });
       if (error) throw error;
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      toast.error(t('Không thể tải danh sách sản phẩm', 'Failed to load products'));
-    } finally {
-      setLoading(false);
+      return data;
     }
+  });
+
+  // 2. Dùng React Query để lấy Tồn kho
+  const { data: stocks = {} } = useQuery({
+    queryKey: ['public-stock'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('product_stock').select('*');
+      if (error) throw error;
+      const map = {};
+      data?.forEach(s => map[s.product_id] = s.stock_count);
+      return map;
+    }
+  });
+
+  const filteredProducts = useMemo(() => {
+      return products.filter(p => {
+          const matchesSearch = (p.title + (p.title_en || '')).toLowerCase().includes(search.toLowerCase());
+          const matchesType = filterType === 'all' 
+              ? true 
+              : filterType === 'digital' ? p.is_digital : !p.is_digital;
+          return matchesSearch && matchesType;
+      });
+  }, [products, search, filterType]);
+
+  const handleAddToCart = (p) => {
+      addToCart(p);
+      toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
-  // --- LOGIC KIỂM TRA TỒN KHO ---
-  const checkAvailability = (product) => {
-    // 1. API Mode -> Luôn có hàng
-    if (product.is_digital && product.allow_external_key) return true;
-    // 2. Tồn kho vật lý (đã được Trigger SQL đồng bộ) -> > 0 là có hàng
-    return (product.physical_stock > 0);
-  };
+  const handleBuyNow = (p) => {
+      if (p.variants && p.variants.length > 0) {
+          navigate(`/product/${p.id}`);
+      } else {
+          addToCart(p);
+          navigate('/cart');
+      }
+  }
 
-  const handleAddToCart = (e, product) => {
-    e.preventDefault();
-    if (!checkAvailability(product)) {
-      toast.error(t('Sản phẩm tạm hết hàng', 'Out of Stock'));
-      return;
-    }
-    // Mặc định chọn variant đầu tiên nếu có
-    const defaultVariant = product.variant_stocks && product.variant_stocks.length > 0
-      ? product.variant_stocks[0].options
-      : null;
-    addToCart(product, defaultVariant);
-  };
+  if (loadingProducts) return (
+      <div className="flex justify-center items-center h-screen text-blue-600">
+          <Loader className="animate-spin w-10 h-10"/>
+      </div>
+  );
 
   return (
-    <div className="min-h-screen pt-20 pb-10 bg-gray-50">
-      <div className="container mx-auto px-4">
-        {/* Header & Filter */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-          <h1 className="text-3xl font-bold text-gray-900">{t('Sản Phẩm', 'Products')}</h1>
-          
-          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-            {/* Category Filter */}
-            <div className="relative">
-              <select 
-                value={categoryFilter}
-                onChange={(e) => setSearchParams({ category: e.target.value, search: searchQuery })}
-                className="appearance-none bg-white border border-gray-200 rounded-lg px-4 py-2 pr-8 focus:outline-none focus:border-blue-500 w-full sm:w-48"
-              >
-                <option value="all">{t('Tất cả danh mục', 'All Categories')}</option>
-                <option value="software">{t('Phần mềm', 'Software')}</option>
-                <option value="account">{t('Tài khoản', 'Account')}</option>
-                <option value="physical">{t('Vật lý', 'Physical')}</option>
-              </select>
-              <FiFilter className="absolute right-3 top-3 text-gray-400" />
+    <div className="pb-10">
+      
+      {/* HERO BANNER */}
+      <section className="py-14 mb-10 bg-gradient-to-b from-blue-50 to-white rounded-3xl border border-blue-50/50">
+        <div className="text-center max-w-2xl mx-auto px-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold mb-4">
+                <Package size={14}/> {t('Kho hàng chính hãng', 'Official Inventory')}
             </div>
-
-            {/* Search */}
-            <div className="relative w-full sm:w-64">
-              <input 
-                type="text" 
-                placeholder={t('Tìm kiếm...', 'Search...')}
-                value={searchQuery}
-                onChange={(e) => setSearchParams({ category: categoryFilter, search: e.target.value })}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
-              />
-              <FiSearch className="absolute left-3 top-3 text-gray-400" />
-            </div>
-          </div>
+            <h1 className="text-4xl font-extrabold text-slate-800 mb-4">
+                {t('Khám phá', 'Explore')} <span className="text-blue-600">CryptoShop</span>
+            </h1>
+            <p className="text-slate-500 text-lg">
+                {t('Tìm kiếm sản phẩm số và vật lý chất lượng cao. Thanh toán nhanh chóng, an toàn.', 'Find high-quality digital and physical products. Fast, safe, and secure payment.')}
+            </p>
         </div>
+      </section>
 
-        {/* Product Grid */}
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      {/* TOOLBAR */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm sticky top-20 z-30">
+          <div className="flex items-center gap-2">
+              <Layers className="text-blue-600"/>
+              <h2 className="font-bold text-slate-700 text-lg">
+                  {t('Tất cả sản phẩm', 'All Products')} <span className="text-slate-400 text-sm font-normal">({filteredProducts.length})</span>
+              </h2>
           </div>
-        ) : products.length === 0 ? (
-          <div className="text-center py-20 text-gray-500">
-            {t('Không tìm thấy sản phẩm nào.', 'No products found.')}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {products.map((product) => {
-              const isAvailable = checkAvailability(product);
-              // Xác định label hiển thị
-              let stockLabel = t('Hết hàng', 'Out of Stock');
-              let badgeColor = 'bg-red-500';
 
-              if (isAvailable) {
-                  if (product.is_digital && product.allow_external_key) {
-                      stockLabel = 'Auto API';
-                      badgeColor = 'bg-blue-500';
-                  } else {
-                      stockLabel = `${t('Sẵn hàng', 'In Stock')}`; // Có thể thêm số lượng: : ${product.physical_stock}
-                      badgeColor = 'bg-green-500';
-                  }
-              }
+          <div className="flex gap-3 w-full md:w-auto">
+              <div className="relative flex-1 md:w-72">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                  <input 
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition bg-slate-50 focus:bg-white"
+                    placeholder={t('Tìm tên sản phẩm...', 'Search products...')}
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+              </div>
+              <select 
+                className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer font-medium text-slate-600"
+                value={filterType}
+                onChange={e => setFilterType(e.target.value)}
+              >
+                  <option value="all">{t('Tất cả loại', 'All Types')}</option>
+                  <option value="digital">Digital (Key)</option>
+                  <option value="physical">Physical (Ship)</option>
+              </select>
+          </div>
+      </div>
+
+      {/* GRID */}
+      {filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {filteredProducts.map((p) => {
+              const stock = stocks[p.id] || 0;
+              const hasVariants = p.variants && Array.isArray(p.variants) && p.variants.length > 0;
+              
+              // LOGIC MỚI: Coi là có hàng nếu còn stock HOẶC cho phép lấy key API
+              const isAvailable = stock > 0 || p.allow_external_key;
 
               return (
-                <Link 
-                  to={`/products/${product.id}`} 
-                  key={product.id}
-                  className="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden group flex flex-col h-full"
-                >
-                  <div className="aspect-video bg-gray-100 relative overflow-hidden">
-                    <img 
-                      src={product.images?.[0] || 'https://via.placeholder.com/400x225?text=No+Image'} 
-                      alt={product.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
+                <div key={p.id} className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
+                  <Link to={`/product/${p.id}`} className="relative block h-52 overflow-hidden bg-gray-100">
+                      {p.images && p.images[0] ? (
+                        <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
+                      ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
+                      
+                      <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
+                          {/* BADGE TRẠNG THÁI HÀNG HOÁ */}
+                          <span className={`px-2.5 py-1 text-[10px] font-bold rounded-lg text-white shadow-sm ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`}>
+                             {stock > 0 
+                                ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` 
+                                : (p.allow_external_key ? t('Sẵn hàng', 'In Stock') : t('Hết hàng', 'Out of Stock'))
+                             }
+                          </span>
+                          
+                          {p.is_digital ? 
+                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-purple-600 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Zap size={10}/> DIGITAL</span> :
+                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-500 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Box size={10}/> PHYSIC</span>
+                          }
+                      </div>
+                  </Link>
+                  
+                  <div className="p-5 flex flex-col flex-grow">
+                    <Link to={`/product/${p.id}`}>
+                      <h3 className="font-bold text-base mb-2 text-slate-800 hover:text-blue-600 transition line-clamp-2 min-h-[3rem]">
+                          {lang === 'vi' ? p.title : (p.title_en || p.title)}
+                      </h3>
+                    </Link>
                     
-                    {/* Stock Status Badge */}
-                    <div className="absolute top-2 right-2">
-                        <span className={`${badgeColor} text-white text-xs px-2 py-1 rounded-full font-medium flex items-center shadow-sm`}>
-                          {isAvailable ? <FiCheck className="mr-1" /> : <FiX className="mr-1" />}
-                          {stockLabel}
-                        </span>
-                    </div>
-                  </div>
+                    <div className="mt-auto pt-2">
+                      <div className="flex justify-between items-center mb-4">
+                         <span className="text-green-600 font-extrabold text-xl">{p.price} USDT</span>
+                         
+                         {/* DỊCH CHỮ MANY OPTIONS */}
+                         {hasVariants && (
+                             <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-medium">
+                                 {t('Nhiều tùy chọn', 'Many options')}
+                             </span>
+                         )}
+                      </div>
 
-                  <div className="p-4 flex flex-col flex-grow">
-                    <div className="text-xs text-gray-500 mb-1 uppercase tracking-wider font-semibold">
-                       {product.is_digital ? 'Digital' : 'Physical'}
-                    </div>
-                    <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3rem]">
-                       {lang === 'vi' ? product.title : (product.title_en || product.title)}
-                    </h3>
-                    <div className="mt-auto flex items-center justify-between">
-                      <span className="text-blue-600 font-bold text-lg">
-                        {product.price} USDT
-                      </span>
-                      <button 
-                        onClick={(e) => handleAddToCart(e, product)}
-                        disabled={!isAvailable}
-                        className={`p-2 rounded-lg transition-colors ${
-                          isAvailable 
-                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        }`}
-                      >
-                        <FiShoppingCart className="w-5 h-5" />
-                      </button>
+                      <div className="grid grid-cols-2 gap-3">
+                         {hasVariants ? (
+                             <Link to={`/product/${p.id}`} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs flex items-center justify-center">
+                                {t('Tùy chọn', 'Options')}
+                             </Link>
+                         ) : (
+                             <button onClick={() => handleAddToCart(p)} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs">
+                                {t('Thêm giỏ', 'Add Cart')}
+                             </button>
+                         )}
+
+                         <button onClick={() => handleBuyNow(p)} disabled={!isAvailable} className="bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-xs shadow-blue-200">
+                            {t('Mua ngay', 'Buy Now')}
+                         </button>
+                      </div>
                     </div>
                   </div>
-                </Link>
-              );
+                </div>
+              )
             })}
           </div>
-        )}
-      </div>
+      ) : (
+          <div className="text-center py-24 bg-white rounded-3xl border border-slate-100">
+              <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-400">
+                  <Search size={40}/>
+              </div>
+              <h3 className="text-xl font-bold text-slate-700 mb-2">{t('Không tìm thấy sản phẩm', 'No products found')}</h3>
+              <p className="text-slate-500">{t('Thử tìm kiếm với từ khóa khác xem sao.', 'Try searching with different keywords.')}</p>
+          </div>
+      )}
     </div>
   );
 }
