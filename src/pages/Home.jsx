@@ -17,7 +17,7 @@ const Home = () => {
 
   const fetchProducts = async () => {
     try {
-      // Lấy 8 sản phẩm mới nhất, sắp xếp theo ngày tạo giảm dần
+      // Lấy 8 sản phẩm mới nhất
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -111,8 +111,9 @@ const Home = () => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {products.map((product) => {
-              // LOGIC TÍNH TOÁN STOCK CHÍNH XÁC
-              const isAvailable = product.get_key_via_api === true || (product.physical_stock > 0);
+              // --- FIX LOGIC HIỂN THỊ STOCK ---
+              // Chỉ hiện Out of Stock khi: KHÔNG bật API VÀ (physical_stock <= 0 hoặc null)
+              const isAvailable = product.get_key_via_api === true || (product.physical_stock && product.physical_stock > 0);
 
               return (
                 <div key={product.id} className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 border border-gray-100 dark:border-gray-700 overflow-hidden flex flex-col">
@@ -122,6 +123,7 @@ const Home = () => {
                       alt={product.name}
                       className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500"
                     />
+                    
                     {/* Badge Stock */}
                     {!isAvailable && (
                       <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
