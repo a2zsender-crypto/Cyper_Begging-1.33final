@@ -18,7 +18,6 @@ const Products = () => {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      // Lấy đủ dữ liệu để tính toán
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -33,27 +32,25 @@ const Products = () => {
     }
   };
 
-  // --- LOGIC TÍNH TỒN KHO (CHỈ SỬA Ở ĐÂY) ---
-  const calculateStock = (product) => {
-    // 1. Nếu cho phép lấy key ngoài -> Luôn báo còn hàng (trả về số lớn)
-    if (product.allow_external_key) return 9999;
+  // --- LOGIC SỬA LỖI STOCK (KHÔNG ĐỔI GIAO DIỆN) ---
+  const getStock = (product) => {
+    // 1. Nếu cho phép lấy key ngoài (API) -> Luôn In Stock
+    if (product.allow_external_key) return 999;
 
-    // 2. Nếu là sản phẩm vật lý -> Dùng kho vật lý
+    // 2. Nếu là hàng Vật lý -> Lấy physical_stock
     if (!product.is_digital) {
       return product.physical_stock || 0;
     }
 
-    // 3. Nếu là sản phẩm số (Digital Key)
-    // Cộng tổng tồn kho của các biến thể (nếu có)
+    // 3. Nếu là hàng Số (Digital) -> Cộng tổng stock các biến thể
     if (product.variant_stocks && Array.isArray(product.variant_stocks) && product.variant_stocks.length > 0) {
       return product.variant_stocks.reduce((total, v) => total + (Number(v.stock) || 0), 0);
     }
 
-    // Fallback: Nếu không có biến thể, check kho vật lý
-    return product.physical_stock || 0;
+    // Mặc định trả về 0 nếu không tìm thấy kho
+    return 0;
   };
 
-  // Lọc sản phẩm
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filter === 'all' 
@@ -66,15 +63,14 @@ const Products = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header & Filter giữ nguyên */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">Sản Phẩm</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Products</h1>
         
         <div className="flex w-full md:w-auto gap-4">
           <div className="relative flex-grow md:flex-grow-0">
             <input
               type="text"
-              placeholder="Tìm kiếm..."
+              placeholder="Search products..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full"
@@ -87,9 +83,9 @@ const Products = () => {
             onChange={(e) => setFilter(e.target.value)}
             className="pl-4 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
           >
-            <option value="all">Tất cả</option>
-            <option value="digital">Sản phẩm số</option>
-            <option value="physical">Sản phẩm vật lý</option>
+            <option value="all">All Products</option>
+            <option value="digital">Digital Products</option>
+            <option value="physical">Physical Products</option>
           </select>
         </div>
       </div>
@@ -101,23 +97,22 @@ const Products = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map((product) => {
-            const stock = calculateStock(product);
+            const stock = getStock(product);
             const isOutOfStock = stock <= 0;
             const hasVariants = product.variants && product.variants.length > 0;
 
             return (
               <div key={product.id} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col h-full border border-gray-100">
                 <Link to={`/products/${product.id}`} className="block relative aspect-video overflow-hidden bg-gray-100">
-                   <img
+                  <img
                     src={product.images?.[0] || 'https://via.placeholder.com/300x200?text=No+Image'}
                     alt={product.title}
                     className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
                   />
-                  {/* Badge Hết hàng (Giữ nguyên style cũ) */}
                   {isOutOfStock && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                       <span className="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wide">
-                        Hết hàng
+                        Out of Stock
                       </span>
                     </div>
                   )}
@@ -133,15 +128,13 @@ const Products = () => {
                   <div className="mt-auto pt-4 flex items-center justify-between">
                     <div>
                       <span className="text-xl font-bold text-blue-600">
-                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
+                        {product.price} USDT
                       </span>
-                      {/* Hiển thị dòng trạng thái kho (Giữ nguyên text) */}
                       <p className={`text-xs mt-1 ${isOutOfStock ? 'text-red-500' : 'text-green-600'}`}>
-                         {isOutOfStock ? 'Tạm hết hàng' : `Còn lại: ${stock > 999 ? '999+' : stock}`}
+                        {isOutOfStock ? 'Out of Stock' : 'In Stock'}
                       </p>
                     </div>
 
-                    {/* Nút Mua hàng */}
                     {hasVariants ? (
                       <Link
                         to={`/products/${product.id}`}
