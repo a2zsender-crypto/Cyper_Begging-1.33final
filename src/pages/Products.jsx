@@ -1,133 +1,203 @@
-import React, { useState, useEffect, useContext } from 'react';
+import { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { Link } from 'react-router-dom';
-import { LangContext } from '../context/LangContext';
+import { Link, useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
+import { useLang } from '../context/LangContext';
+import { ShoppingBag, Search, Zap, Box, Package, Layers, Loader } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { toast } from 'react-toastify';
 
-const Products = () => {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState('all');
-  const { lang } = useContext(LangContext);
+export default function Products() {
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('all');
+  
+  const { addToCart } = useCart();
+  const { t, lang } = useLang();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const fetchProducts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false });
-
+  // 1. Dùng React Query để lấy Sản phẩm
+  const { data: products = [], isLoading: loadingProducts } = useQuery({
+    queryKey: ['public-products'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('products').select('*').order('id', { ascending: false });
       if (error) throw error;
-      setProducts(data);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
+      return data;
     }
+  });
+
+  // 2. Dùng React Query để lấy Tồn kho
+  const { data: stocks = {} } = useQuery({
+    queryKey: ['public-stock'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('product_stock').select('*');
+      if (error) throw error;
+      const map = {};
+      data?.forEach(s => map[s.product_id] = s.stock_count);
+      return map;
+    }
+  });
+
+  const filteredProducts = useMemo(() => {
+      return products.filter(p => {
+          const matchesSearch = (p.title + (p.title_en || '')).toLowerCase().includes(search.toLowerCase());
+          const matchesType = filterType === 'all' 
+              ? true 
+              : filterType === 'digital' ? p.is_digital : !p.is_digital;
+          return matchesSearch && matchesType;
+      });
+  }, [products, search, filterType]);
+
+  const handleAddToCart = (p) => {
+      addToCart(p);
+      toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
-  const filteredProducts = category === 'all' 
-    ? products 
-    : products.filter(p => p.category === category);
+  const handleBuyNow = (p) => {
+      if (p.variants && p.variants.length > 0) {
+          navigate(`/product/${p.id}`);
+      } else {
+          addToCart(p);
+          navigate('/cart');
+      }
+  }
 
-  const formatPrice = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
-    }).format(amount);
-  };
+  if (loadingProducts) return (
+      <div className="flex justify-center items-center h-screen text-blue-600">
+          <Loader className="animate-spin w-10 h-10"/>
+      </div>
+  );
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h2 className="text-3xl font-bold mb-8 text-center">
-        {lang === 'vi' ? 'Sản phẩm' : 'Our Products'}
-      </h2>
+    <div className="pb-10">
       
-      {/* Category Filter */}
-      <div className="flex justify-center gap-4 mb-8">
-        <button 
-          onClick={() => setCategory('all')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            category === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          All
-        </button>
-        <button 
-          onClick={() => setCategory('account')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            category === 'account' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Accounts
-        </button>
-        <button 
-          onClick={() => setCategory('software')}
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            category === 'software' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Software
-        </button>
+      {/* HERO BANNER */}
+      <section className="py-14 mb-10 bg-gradient-to-b from-blue-50 to-white rounded-3xl border border-blue-50/50">
+        <div className="text-center max-w-2xl mx-auto px-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold mb-4">
+                <Package size={14}/> {t('Kho hàng chính hãng', 'Official Inventory')}
+            </div>
+            <h1 className="text-4xl font-extrabold text-slate-800 mb-4">
+                {t('Khám phá', 'Explore')} <span className="text-blue-600">CryptoShop</span>
+            </h1>
+            <p className="text-slate-500 text-lg">
+                {t('Tìm kiếm sản phẩm số và vật lý chất lượng cao. Thanh toán nhanh chóng, an toàn.', 'Find high-quality digital and physical products. Fast, safe, and secure payment.')}
+            </p>
+        </div>
+      </section>
+
+      {/* TOOLBAR */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm sticky top-20 z-30">
+          <div className="flex items-center gap-2">
+              <Layers className="text-blue-600"/>
+              <h2 className="font-bold text-slate-700 text-lg">
+                  {t('Tất cả sản phẩm', 'All Products')} <span className="text-slate-400 text-sm font-normal">({filteredProducts.length})</span>
+              </h2>
+          </div>
+
+          <div className="flex gap-3 w-full md:w-auto">
+              <div className="relative flex-1 md:w-72">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                  <input 
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition bg-slate-50 focus:bg-white"
+                    placeholder={t('Tìm tên sản phẩm...', 'Search products...')}
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+              </div>
+              <select 
+                className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer font-medium text-slate-600"
+                value={filterType}
+                onChange={e => setFilterType(e.target.value)}
+              >
+                  <option value="all">{t('Tất cả loại', 'All Types')}</option>
+                  <option value="digital">Digital (Key)</option>
+                  <option value="physical">Physical (Ship)</option>
+              </select>
+          </div>
       </div>
 
-      {loading ? (
-        <div className="text-center py-12">Loading...</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProducts.map((product) => {
-             // Logic check stock fix: API products are always available usually, or check strict stock
-             const isAvailable = product.type === 'key' || product.stock > 0;
-             
-             return (
-              <div key={product.id} className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-                <Link to={`/product/${product.id}`} className="block"> {/* FIX: Removed 's' from /products/ */}
-                  <div className="relative aspect-video">
-                    <img 
-                      src={product.image_url || 'https://via.placeholder.com/400x225?text=No+Image'} 
-                      alt={product.name}
-                      className="w-full h-full object-cover"
-                    />
-                    {!isAvailable && (
-                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                        <span className="text-white font-bold text-lg">Out of Stock</span>
+      {/* GRID */}
+      {filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {filteredProducts.map((p) => {
+              const stock = stocks[p.id] || 0;
+              const hasVariants = p.variants && Array.isArray(p.variants) && p.variants.length > 0;
+              
+              // LOGIC MỚI: Coi là có hàng nếu còn stock HOẶC cho phép lấy key API
+              const isAvailable = stock > 0 || p.allow_external_key;
+
+              return (
+                <div key={p.id} className="bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
+                  <Link to={`/product/${p.id}`} className="relative block h-52 overflow-hidden bg-gray-100">
+                      {p.images && p.images[0] ? (
+                        <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
+                      ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
+                      
+                      <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
+                          {/* BADGE TRẠNG THÁI HÀNG HOÁ */}
+                          <span className={`px-2.5 py-1 text-[10px] font-bold rounded-lg text-white shadow-sm ${isAvailable ? 'bg-green-500' : 'bg-red-500'}`}>
+                             {stock > 0 
+                                ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` 
+                                : (p.allow_external_key ? t('Sẵn hàng', 'In Stock') : t('Hết hàng', 'Out of Stock'))
+                             }
+                          </span>
+                          
+                          {p.is_digital ? 
+                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-purple-600 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Zap size={10}/> DIGITAL</span> :
+                             <span className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-500 text-white shadow-sm backdrop-blur-md bg-opacity-90"><Box size={10}/> PHYSIC</span>
+                          }
                       </div>
-                    )}
-                  </div>
+                  </Link>
                   
-                  <div className="p-5">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-xl font-bold text-gray-800 line-clamp-1">{product.name}</h3>
-                      <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">
-                        {product.category}
-                      </span>
-                    </div>
+                  <div className="p-5 flex flex-col flex-grow">
+                    <Link to={`/product/${p.id}`}>
+                      <h3 className="font-bold text-base mb-2 text-slate-800 hover:text-blue-600 transition line-clamp-2 min-h-[3rem]">
+                          {lang === 'vi' ? p.title : (p.title_en || p.title)}
+                      </h3>
+                    </Link>
                     
-                    <p className="text-gray-600 mb-4 line-clamp-2 text-sm">{product.description}</p>
-                    
-                    <div className="flex justify-between items-center mt-auto">
-                      <span className="text-2xl font-bold text-blue-600">
-                         {formatPrice(product.price)}
-                      </span>
-                      <span className={`text-sm font-medium ${isAvailable ? 'text-green-600' : 'text-red-600'}`}>
-                        {isAvailable 
-                          ? (lang === 'vi' ? 'Sẵn hàng' : 'In Stock') 
-                          : (lang === 'vi' ? 'Hết hàng' : 'Out of Stock')}
-                      </span>
+                    <div className="mt-auto pt-2">
+                      <div className="flex justify-between items-center mb-4">
+                         <span className="text-green-600 font-extrabold text-xl">{p.price} USDT</span>
+                         
+                         {/* DỊCH CHỮ MANY OPTIONS */}
+                         {hasVariants && (
+                             <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-medium">
+                                 {t('Nhiều tùy chọn', 'Many options')}
+                             </span>
+                         )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                         {hasVariants ? (
+                             <Link to={`/product/${p.id}`} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs flex items-center justify-center">
+                                {t('Tùy chọn', 'Options')}
+                             </Link>
+                         ) : (
+                             <button onClick={() => handleAddToCart(p)} className="bg-slate-50 text-slate-700 py-2.5 rounded-xl font-bold hover:bg-slate-100 transition border border-slate-200 text-xs">
+                                {t('Thêm giỏ', 'Add Cart')}
+                             </button>
+                         )}
+
+                         <button onClick={() => handleBuyNow(p)} disabled={!isAvailable} className="bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-xs shadow-blue-200">
+                            {t('Mua ngay', 'Buy Now')}
+                         </button>
+                      </div>
                     </div>
                   </div>
-                </Link>
+                </div>
+              )
+            })}
+          </div>
+      ) : (
+          <div className="text-center py-24 bg-white rounded-3xl border border-slate-100">
+              <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-400">
+                  <Search size={40}/>
               </div>
-            );
-          })}
-        </div>
+              <h3 className="text-xl font-bold text-slate-700 mb-2">{t('Không tìm thấy sản phẩm', 'No products found')}</h3>
+              <p className="text-slate-500">{t('Thử tìm kiếm với từ khóa khác xem sao.', 'Try searching with different keywords.')}</p>
+          </div>
       )}
     </div>
   );
-};
-
-export default Products;
+}
