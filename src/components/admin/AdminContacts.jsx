@@ -2,13 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../supabaseClient';
 import { MessageSquare, Plus, X, Send } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom'; // Bỏ useSearchParams ở đây để nhận từ props cho chuẩn
 import { toast } from 'react-toastify';
 
 export default function AdminContacts({ session, role, activeTicketId }) {
   const { t } = useLang();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams(); // [MỚI] Hook lấy params từ URL
   const [contacts, setContacts] = useState([]);
   const [showTicketModal, setShowTicketModal] = useState(null);
   const [ticketReplies, setTicketReplies] = useState([]);
@@ -16,38 +15,34 @@ export default function AdminContacts({ session, role, activeTicketId }) {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
-    fetchContacts();
+    if (session) fetchContacts();
   }, [role, session]);
 
-  // LOGIC 1: MỞ TICKET TỰ ĐỘNG (Kết hợp cả props và URL)
+  // LOGIC 1: MỞ TICKET TỰ ĐỘNG (Từ URL/Props)
+  // Khi activeTicketId thay đổi (do click thông báo) hoặc khi list contacts load xong -> Tự mở
   useEffect(() => {
-      // Ưu tiên lấy từ URL trước để đảm bảo click thông báo hoạt động
-      const urlTicketId = searchParams.get('ticketId');
-      const targetId = urlTicketId || activeTicketId;
-
-      // Chỉ mở khi danh sách contacts đã load xong và có targetId
-      if (targetId && contacts.length > 0) {
-          const ticket = contacts.find(c => c.id.toString() === targetId);
+      if (activeTicketId && contacts.length > 0) {
+          const ticket = contacts.find(c => c.id.toString() === activeTicketId.toString());
+          
+          // Chỉ mở nếu tìm thấy ticket và modal chưa mở hoặc đang mở ticket khác
           if (ticket) {
-              // Kiểm tra nếu chưa mở hoặc đang mở ticket khác thì mới mở
               if (!showTicketModal || showTicketModal.id !== ticket.id) {
                   openTicketChat(ticket);
               }
           }
       }
-  }, [activeTicketId, contacts, searchParams]); // Thêm searchParams vào dependency
+  }, [activeTicketId, contacts]);
 
-  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (Xử lý khi click thông báo mà không reload trang)
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (Xử lý realtime popup)
   useEffect(() => {
       const handleForceOpen = (e) => {
           const ticketId = e.detail;
-          const ticket = contacts.find(c => c.id.toString() === ticketId);
+          const ticket = contacts.find(c => c.id.toString() === ticketId.toString());
           if (ticket) {
               openTicketChat(ticket);
           } else {
-              // Nếu ticket chưa có trong list (mới tạo), fetch lại rồi mở
               fetchContacts().then((data) => {
-                  const newTicket = data?.find(c => c.id.toString() === ticketId);
+                  const newTicket = data?.find(c => c.id.toString() === ticketId.toString());
                   if (newTicket) openTicketChat(newTicket);
               });
           }
@@ -60,12 +55,14 @@ export default function AdminContacts({ session, role, activeTicketId }) {
   // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
 
-  // REALTIME
+  // REALTIME CONTACTS LIST
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts-list')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, 
-          (payload) => { setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); })
+          (payload) => { 
+              setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); 
+          })
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, 
           (payload) => {
               if (role === 'admin' || (role === 'user' && payload.new.email === session.user.email)) {
@@ -77,7 +74,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT
+  // REALTIME CHAT MESSAGES
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-room-${showTicketModal.id}`)
@@ -106,6 +103,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       const { data } = await supabase.from('contact_replies').select('*').eq('contact_id', ticket.id).order('created_at', { ascending: true });
       setTicketReplies(data || []);
       
+      // Admin mở thì tự động đánh dấu processed
       if (role === 'admin' && ticket.status === 'new') {
           await supabase.from('contacts').update({ status: 'processed' }).eq('id', ticket.id);
       }
