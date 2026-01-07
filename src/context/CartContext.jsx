@@ -16,22 +16,18 @@ export const CartProvider = ({ children }) => {
   }, [cart]);
 
   const addToCart = (product, variant = null) => {
-    // LOGIC KIỂM TRA TỒN KHO MỚI
-    // 1. Nếu sp cho phép lấy key qua API khi hết hàng -> Luôn cho phép mua (In Stock)
-    // 2. Nếu không, kiểm tra physical_stock (tổng tồn kho)
-    // 3. Nếu có biến thể, physical_stock là tổng của các biến thể, nên logic này vẫn đúng ở mức Product. 
-    //    Tuy nhiên, nếu chọn variant cụ thể, cần check tồn kho của variant đó (nếu logic FE có lưu variant_stocks).
-    //    Ở đây ta check mức độ sản phẩm cơ bản trước.
-
+    // LOGIC CHECK TỒN KHO CHUẨN:
+    // 1. Ưu tiên: Nếu bật get_key_via_api -> Luôn tính là còn hàng (In Stock)
+    // 2. Nếu không bật API: Kiểm tra physical_stock > 0
     const isAvailable = product.get_key_via_api === true || (product.physical_stock && product.physical_stock > 0);
 
     if (!isAvailable) {
-      toast.error('Sản phẩm đã hết hàng!');
-      return; // QUAN TRỌNG: Dừng hàm ngay lập tức, không chạy tiếp code bên dưới
+      toast.error('Sản phẩm này đã hết hàng!');
+      return; // <--- QUAN TRỌNG: Dừng ngay, không chạy tiếp code bên dưới
     }
 
     setCart((prevCart) => {
-      // Tạo ID duy nhất cho item trong giỏ: ProductID + VariantName (nếu có)
+      // Tạo ID duy nhất: Nếu có variant thì ID là productID-variantName, nếu không thì là productID
       const cartItemId = variant 
         ? `${product.id}-${variant.name}` 
         : `${product.id}`;
@@ -39,9 +35,8 @@ export const CartProvider = ({ children }) => {
       const existingItem = prevCart.find((item) => item.cartItemId === cartItemId);
 
       if (existingItem) {
-        // Kiểm tra tồn kho khi tăng số lượng (tùy chọn, ở đây tạm bỏ qua để đơn giản hoặc check tiếp)
-        // Nếu muốn chặt chẽ: if (!product.get_key_via_api && existingItem.quantity >= product.physical_stock) ...
-
+        // (Tùy chọn) Có thể check thêm tồn kho tại đây nếu muốn chặn số lượng > tồn kho
+        // Nhưng tạm thời chỉ check ở bước đầu vào
         toast.success('Đã cập nhật số lượng trong giỏ hàng!');
         return prevCart.map((item) =>
           item.cartItemId === cartItemId
@@ -54,10 +49,10 @@ export const CartProvider = ({ children }) => {
           ...prevCart,
           {
             ...product,
-            cartItemId, // Lưu ID định danh
-            selectedVariant: variant, // Lưu thông tin variant đã chọn
+            cartItemId, 
+            selectedVariant: variant, 
             quantity: 1,
-            // Giá có thể thay đổi theo variant, đảm bảo lấy đúng giá
+            // Nếu có biến thể thì lấy giá biến thể, không thì giá gốc
             price: variant ? variant.price : product.price 
           },
         ];
@@ -86,8 +81,6 @@ export const CartProvider = ({ children }) => {
 
   const getCartTotal = () => {
     return cart.reduce((total, item) => {
-      // Giá item đã được xử lý khi add to cart (variant price hoặc product price)
-      // Cần đảm bảo item.price là số
       const price = parseFloat(item.price) || 0;
       return total + price * item.quantity;
     }, 0);
