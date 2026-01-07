@@ -1,34 +1,60 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import Layout from '../components/Layout';
-import { Link } from 'react-router-dom';
-import { CartContext } from '../context/CartContext';
-import { FaShoppingCart, FaFilter, FaSearch } from 'react-icons/fa';
+import { useCart } from '../context/CartContext';
+import { Search, Filter, ShoppingCart, Star } from 'lucide-react';
+import { useLang } from '../context/LangContext';
 
 const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const { addToCart } = useContext(CartContext);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const { addToCart } = useCart();
+  const { t } = useLang();
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+    fetchCategories();
+  }, [searchParams]);
+
+  const fetchCategories = async () => {
+    try {
+      // Lấy danh sách category unique từ bảng products
+      const { data, error } = await supabase
+        .from('products')
+        .select('category');
+      
+      if (error) throw error;
+      
+      const uniqueCategories = [...new Set(data.map(item => item.category).filter(Boolean))];
+      setCategories(uniqueCategories);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
 
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      // LẤY ĐẦY ĐỦ DATA RELATIONS
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          product_variants(*),
-          product_keys(id, is_used)
-        `)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+      let query = supabase.from('products').select('*');
+
+      // Filter by Category
+      if (selectedCategory !== 'all') {
+        query = query.eq('category', selectedCategory);
+      }
+
+      // Filter by Search
+      if (searchQuery) {
+        query = query.ilike('name', `%${searchQuery}%`);
+      }
+
+      // Sort
+      query = query.order('created_at', { ascending: false });
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setProducts(data || []);
@@ -39,124 +65,151 @@ const Products = () => {
     }
   };
 
-  // LOGIC TÍNH STOCK CHUẨN
-  const checkStockStatus = (product) => {
-    if (product.check_stock_api) return true;
-    if (product.has_variants && product.product_variants?.length > 0) {
-      const totalVariantStock = product.product_variants.reduce(
-        (acc, variant) => acc + (variant.stock_quantity || 0), 
-        0
-      );
-      return totalVariantStock > 0;
-    }
-    if (product.is_digital) {
-      const availableKeys = product.product_keys 
-        ? product.product_keys.filter(k => !k.is_used).length 
-        : 0;
-      return availableKeys > 0;
-    }
-    return (product.physical_stock || 0) > 0;
-  };
-
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'All' || product.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  const categories = ['All', ...new Set(products.map(p => p.category).filter(Boolean))];
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchProducts();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedCategory]);
 
   return (
-    <Layout>
-      <div className="bg-gray-100 py-10">
-        <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-            <h1 className="text-3xl font-bold text-gray-800">All Products</h1>
-            
-            <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-              {/* Search */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  className="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                <FaSearch className="absolute left-3 top-3 text-gray-400" />
-              </div>
+    <div className="space-y-8">
+      {/* Header & Filters */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold dark:text-white">{t('allProducts')}</h1>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+              {products.length} {t('productsAvailable')}
+            </p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Search */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={t('searchPlaceholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full sm:w-64 pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-white"
+              />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            </div>
 
-              {/* Filter */}
-              <div className="relative">
-                <select
-                  className="pl-10 pr-8 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white w-full"
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-                <FaFilter className="absolute left-3 top-3 text-gray-400" />
-              </div>
+            {/* Category Filter */}
+            <div className="relative">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full sm:w-48 pl-10 pr-8 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all appearance-none cursor-pointer dark:text-white"
+              >
+                <option value="all">{t('allCategories')}</option>
+                {categories.map((cat, index) => (
+                  <option key={index} value={cat}>{cat}</option>
+                ))}
+              </select>
+              <Filter className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             </div>
           </div>
-
-          {loading ? (
-            <div className="flex justify-center py-20">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {filteredProducts.map((product) => {
-                const inStock = checkStockStatus(product);
-
-                return (
-                  <div key={product.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300 flex flex-col">
-                    <Link to={`/products/${product.id}`} className="relative h-48 overflow-hidden bg-gray-200">
-                      <img
-                        src={product.image_url || 'https://placehold.co/600x400?text=No+Image'}
-                        alt={product.name}
-                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
-                      />
-                      {!inStock && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                          <span className="bg-red-500 text-white px-3 py-1 text-sm font-bold rounded">OUT OF STOCK</span>
-                        </div>
-                      )}
-                    </Link>
-
-                    <div className="p-4 flex-grow flex flex-col justify-between">
-                      <div>
-                        <div className="text-xs text-gray-500 mb-1 uppercase tracking-wide">{product.category}</div>
-                        <Link to={`/products/${product.id}`}>
-                          <h3 className="font-bold text-gray-800 mb-2 hover:text-blue-600 line-clamp-2">{product.name}</h3>
-                        </Link>
-                      </div>
-                      
-                      <div className="flex justify-between items-center mt-4 pt-4 border-t">
-                        <span className="text-lg font-bold text-blue-600">${product.price}</span>
-                        <button
-                          onClick={() => inStock && addToCart(product)}
-                          disabled={!inStock}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            inStock 
-                              ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          }`}
-                        >
-                          <FaShoppingCart /> {inStock ? 'Add' : 'Sold Out'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
-    </Layout>
+
+      {/* Products Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-lg animate-pulse">
+              <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 rounded-xl mb-4" />
+              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-2" />
+              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
+            </div>
+          ))}
+        </div>
+      ) : products.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {products.map((product) => {
+            // LOGIC TÍNH TOÁN STOCK CHÍNH XÁC (Đồng nhất với Home)
+            const isAvailable = product.get_key_via_api === true || (product.physical_stock > 0);
+
+            return (
+              <div key={product.id} className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 border border-gray-100 dark:border-gray-700 overflow-hidden flex flex-col">
+                <Link to={`/products/${product.id}`} className="relative block aspect-[4/3] overflow-hidden">
+                  <img
+                    src={product.image_url || 'https://via.placeholder.com/400x300?text=No+Image'}
+                    alt={product.name}
+                    className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500"
+                  />
+                  {/* Badge Stock */}
+                  {!isAvailable && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                        {t('outOfStock')}
+                      </span>
+                    </div>
+                  )}
+                  {isAvailable && (
+                     <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">
+                       {t('inStock')}
+                     </div>
+                  )}
+                </Link>
+                
+                <div className="p-5 flex-1 flex flex-col">
+                  <div className="flex items-center justify-between mb-2">
+                     <div className="flex items-center space-x-1">
+                        <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                        <span className="text-sm text-gray-500 dark:text-gray-400">4.9</span>
+                     </div>
+                     <span className="text-xs px-2 py-1 bg-blue-100 text-blue-600 rounded-full font-medium dark:bg-blue-900/30 dark:text-blue-400">
+                        {product.category || 'Digital'}
+                     </span>
+                  </div>
+                  
+                  <Link to={`/products/${product.id}`} className="block mb-2">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white line-clamp-2 hover:text-blue-600 transition-colors">
+                      {product.name}
+                    </h3>
+                  </Link>
+                  
+                  <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-4 flex-1">
+                    {product.description}
+                  </p>
+                  
+                  <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100 dark:border-gray-700">
+                    <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                      {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
+                    </span>
+                    
+                    <button
+                      onClick={() => addToCart(product)}
+                      disabled={!isAvailable}
+                      className={`p-2 rounded-xl transition-colors ${
+                        isAvailable
+                          ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-blue-600 hover:text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                      }`}
+                      title={isAvailable ? t('addToCart') : t('outOfStock')}
+                    >
+                      <ShoppingCart className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Search className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">{t('noProductsFound')}</h3>
+          <p className="text-gray-500 dark:text-gray-400">{t('tryDifferentSearch')}</p>
+        </div>
+      )}
+    </div>
   );
 };
 
