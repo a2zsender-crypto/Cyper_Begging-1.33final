@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { Zap, Wallet, ShieldCheck, ShoppingBag } from 'lucide-react'; // Thêm icon mới
+import { Zap, Wallet, ShieldCheck, ShoppingBag } from 'lucide-react';
 
 export default function Home() {
   const [products, setProducts] = useState([]);
@@ -16,7 +16,7 @@ export default function Home() {
     // Lấy danh sách sản phẩm
     supabase.from('products').select('*').order('id', { ascending: false }).then(({ data }) => setProducts(data || []));
     
-    // Lấy tồn kho
+    // Lấy tồn kho (Yêu cầu phải có View product_stock trong DB)
     supabase.from('product_stock').select('*').then(({ data }) => {
        const map = {};
        data?.forEach(s => map[s.product_id] = s.stock_count);
@@ -24,19 +24,24 @@ export default function Home() {
     });
   }, []);
 
+  // [SỬA LỖI] Tính toán maxStock trước khi thêm vào giỏ
   const handleAddToCart = (p) => {
-      addToCart(p);
+      const currentStock = stocks[p.id] || 0;
+      // Merge thêm maxStock để CartContext không chặn nhầm
+      addToCart({ ...p, maxStock: currentStock });
       alert(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
+  // [SỬA LỖI] Tương tự cho hàm mua ngay
   const handleBuyNow = (p) => {
-      addToCart(p);
+      const currentStock = stocks[p.id] || 0;
+      addToCart({ ...p, maxStock: currentStock });
       navigate('/cart');
   }
 
   return (
     <div>
-      {/* === HERO SECTION (MỚI) === */}
+      {/* === HERO SECTION === */}
       <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
         <div className="text-center max-w-3xl mx-auto px-4">
             <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
@@ -94,6 +99,8 @@ export default function Home() {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
         {products.map((p) => {
           const stock = stocks[p.id] || 0;
+          // [LOGIC MỚI] Kiểm tra xem có thể mua được không (Stock > 0 HOẶC cho phép key ngoài)
+          const isBuyable = stock > 0 || p.allow_external_key;
           
           return (
             <div key={p.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
@@ -104,8 +111,11 @@ export default function Home() {
                   ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
                   
                   {/* Badge Tồn kho */}
-                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}>
-                     {stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Hết hàng', 'Out of Stock')}
+                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white ${isBuyable ? 'bg-green-500' : 'bg-red-500'}`}>
+                     {isBuyable 
+                        ? (stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Sẵn hàng', 'In Stock')) 
+                        : t('Hết hàng', 'Out of Stock')
+                     }
                   </div>
                 </div>
               </Link>
@@ -131,10 +141,19 @@ export default function Home() {
                   </div>
 
                   <div className="flex gap-2">
-                     <button onClick={() => handleAddToCart(p)} className="flex-1 bg-white text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-50 transition border border-slate-200 text-sm">
+                     <button 
+                        onClick={() => handleAddToCart(p)} 
+                        // Cho phép thêm giỏ nếu stock > 0 HOẶC allow_external_key = true
+                        disabled={!isBuyable}
+                        className="flex-1 bg-white text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-50 transition border border-slate-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                     >
                         {t('Thêm giỏ', 'Add to Cart')}
                      </button>
-                     <button onClick={() => handleBuyNow(p)} disabled={stock===0} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-sm">
+                     <button 
+                        onClick={() => handleBuyNow(p)} 
+                        disabled={!isBuyable} 
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-sm"
+                     >
                         {t('Mua ngay', 'Buy Now')}
                      </button>
                   </div>
