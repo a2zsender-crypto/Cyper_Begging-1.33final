@@ -13,27 +13,25 @@ export default function Home() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Chỉ cần lấy từ bảng products, cột physical_stock đã được Trigger DB cập nhật chuẩn
     supabase
       .from('products')
       .select('*')
       .order('id', { ascending: false })
-      .limit(12) // Giới hạn số lượng hiển thị Home cho nhẹ
+      .limit(12)
       .then(({ data }) => setProducts(data || []));
   }, []);
 
-  // Hàm kiểm tra tình trạng kho (Chuẩn Logic)
+  // --- LOGIC CHECK STOCK CHÍNH XÁC ---
   const checkAvailability = (p) => {
-      // 1. Nếu là Digital & Có tích API -> Luôn sẵn hàng
+      // 1. Dùng đúng tên cột allow_external_key
       if (p.is_digital && p.allow_external_key) return true;
-      
-      // 2. Còn lại kiểm tra số tồn kho vật lý (đã sync)
+      // 2. Fallback sang tồn kho vật lý
       return (p.physical_stock > 0);
   };
 
   const getStockLabel = (p) => {
       if (p.is_digital && p.allow_external_key) return { text: t("Auto API", "Auto API"), color: "bg-blue-500" };
-      if (p.physical_stock > 0) return { text: `${t("Sẵn hàng", "In Stock")}: ${p.physical_stock}`, color: "bg-green-500" };
+      if (p.physical_stock > 0) return { text: `${t("Sẵn hàng", "In Stock")}`, color: "bg-green-500" };
       return { text: t("Hết hàng", "Out of Stock"), color: "bg-red-500" };
   };
 
@@ -42,11 +40,9 @@ export default function Home() {
           toast.error(t("Sản phẩm tạm hết hàng", "Out of Stock temporarily"));
           return;
       }
-      // Chọn variant đầu tiên nếu có làm mặc định
       const defaultVariant = p.variants?.length > 0 && p.variant_stocks?.length > 0
           ? p.variant_stocks[0].options 
           : null;
-          
       addToCart(p, defaultVariant);
       toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart!"));
   };
@@ -59,14 +55,13 @@ export default function Home() {
       const defaultVariant = p.variants?.length > 0 && p.variant_stocks?.length > 0
           ? p.variant_stocks[0].options 
           : null;
-
       addToCart(p, defaultVariant);
       navigate('/cart');
   }
 
   return (
     <div>
-      {/* === HERO SECTION === */}
+      {/* Hero Section */}
       <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
         <div className="text-center max-w-3xl mx-auto px-4">
             <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
@@ -96,7 +91,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* === PRODUCT LIST === */}
+      {/* Product List */}
       <h2 className="text-2xl font-bold mb-8 text-slate-800 flex items-center gap-2">
           <ShoppingBag className="text-blue-600"/> {t('Sản phẩm mới nhất', 'Latest Products')}
       </h2>
@@ -114,13 +109,11 @@ export default function Home() {
                     <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
                   ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
                   
-                  {/* Badge Tồn kho */}
                   <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white shadow-sm flex items-center gap-1 ${stockLabel.color}`}>
                      {isAvailable ? <Check size={10}/> : <X size={10}/>}
                      {stockLabel.text}
                   </div>
 
-                  {/* Badge Loại */}
                   <div className="absolute top-2 left-2">
                       {p.is_digital ? 
                         <span className="text-[10px] bg-purple-600/90 text-white px-2 py-1 rounded font-bold backdrop-blur-sm shadow-sm">DIGITAL</span> :
