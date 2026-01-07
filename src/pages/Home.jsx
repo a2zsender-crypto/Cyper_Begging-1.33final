@@ -1,149 +1,147 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Link, useNavigate } from 'react-router-dom';
-import { useCart } from '../context/CartContext';
-import { useLang } from '../context/LangContext';
-import { Zap, Wallet, ShieldCheck, ShoppingBag } from 'lucide-react'; // Thêm icon mới
+import { CartContext } from '../context/CartContext';
+import { FaShoppingCart, FaEye } from 'react-icons/fa';
 
-export default function Home() {
-  const [products, setProducts] = useState([]);
-  const [stocks, setStocks] = useState({});
-  const { addToCart } = useCart();
-  const { t, lang } = useLang();
-  const navigate = useNavigate();
+const Home = () => {
+  const [latestProducts, setLatestProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { addToCart, calculateStock } = useContext(CartContext);
 
   useEffect(() => {
-    // Lấy danh sách sản phẩm
-    supabase.from('products').select('*').order('id', { ascending: false }).then(({ data }) => setProducts(data || []));
-    
-    // Lấy tồn kho
-    supabase.from('product_stock').select('*').then(({ data }) => {
-       const map = {};
-       data?.forEach(s => map[s.product_id] = s.stock_count);
-       setStocks(map);
-    });
+    fetchLatestProducts();
   }, []);
 
-  const handleAddToCart = (p) => {
-      addToCart(p);
-      alert(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
+  const fetchLatestProducts = async () => {
+    try {
+      setLoading(true);
+      // Fetch products và cả variants nếu có (giả sử variants là json hoặc relation)
+      // Nếu variants là table riêng, cú pháp select cần là: *, variants(*)
+      const { data, error } = await supabase
+        .from('products')
+        .select('*, variants(*)') 
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+      if (error) throw error;
+      setLatestProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching latest products:', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleBuyNow = (p) => {
-      addToCart(p);
-      navigate('/cart');
-  }
+  // Helper render Badge (Tái sử dụng logic calculateStock từ Context)
+  const renderStockBadge = (product) => {
+    const stock = calculateStock(product);
+    const isAvailable = stock > 0;
+
+    if (isAvailable) {
+      return (
+        <span className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full z-10 shadow-md">
+          In Stock
+        </span>
+      );
+    }
+    return (
+      <span className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full z-10 shadow-md">
+        Out of Stock
+      </span>
+    );
+  };
 
   return (
-    <div>
-      {/* === HERO SECTION (MỚI) === */}
-      <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
-        <div className="text-center max-w-3xl mx-auto px-4">
-            <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
-                {t('Mua sắm với', 'Shop with')} <span className="text-blue-600">Crypto</span>
-            </h1>
-            <p className="text-slate-500 text-lg mb-10 leading-relaxed">
-                {t(
-                    'Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.',
-                    'High quality digital and physical products with secure cryptocurrency payments via Oxapay.'
-                )}
-            </p>
+    <div className="min-h-screen bg-gray-50">
+      {/* Hero Section - Giữ nguyên nếu có, ở đây tôi demo phần Products */}
+      <div className="bg-blue-600 text-white py-20 text-center">
+        <h1 className="text-4xl font-bold mb-4">Welcome to Auto Shop Pro</h1>
+        <p className="text-xl">Your destination for Digital & Physical Goods</p>
+      </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-                {/* Feature 1 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white flex-shrink-0">
-                        <Zap size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{t('Giao hàng nhanh', 'Fast Delivery')}</h3>
-                        <p className="text-xs text-slate-500">{t('Sản phẩm số tức thì', 'Instant digital items')}</p>
-                    </div>
-                </div>
+      {/* Latest Products Section */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">Latest Products</h2>
+        
+        {loading ? (
+          <div className="text-center py-10">Loading products...</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {latestProducts.map((product) => {
+               // Tính stock ngay tại đây để dùng cho nút Add to Cart
+               const stock = calculateStock(product);
+               const isOutOfStock = stock <= 0;
 
-                {/* Feature 2 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600 flex-shrink-0">
-                        <Wallet size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{t('Thanh toán Crypto', 'Crypto Payment')}</h3>
-                        <p className="text-xs text-slate-500">USDT, BTC, ETH</p>
-                    </div>
-                </div>
+               return (
+                <div key={product.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300 flex flex-col">
+                  <div className="relative group">
+                    <Link to={`/products/${product.id}`}>
+                      <img 
+                        src={product.image_url || 'https://via.placeholder.com/300'} 
+                        alt={product.name} 
+                        className="w-full h-48 object-cover object-center"
+                      />
+                    </Link>
+                    
+                    {/* Stock Badge */}
+                    {renderStockBadge(product)}
 
-                {/* Feature 3 */}
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
-                    <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
-                        <ShieldCheck size={24} />
+                    {/* Quick Action Overlay */}
+                    <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                      <Link 
+                        to={`/products/${product.id}`}
+                        className="p-2 bg-white rounded-full text-gray-800 hover:text-blue-600 mx-2"
+                        title="View Details"
+                      >
+                        <FaEye size={20} />
+                      </Link>
+                      <button
+                        onClick={() => addToCart(product)}
+                        disabled={isOutOfStock}
+                        className={`p-2 rounded-full mx-2 ${
+                          isOutOfStock 
+                            ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                            : 'bg-white text-gray-800 hover:text-green-600'
+                        }`}
+                        title={isOutOfStock ? "Out of Stock" : "Add to Cart"}
+                      >
+                        <FaShoppingCart size={20} />
+                      </button>
                     </div>
+                  </div>
+
+                  <div className="p-4 flex-grow flex flex-col justify-between">
                     <div>
-                        <h3 className="font-bold text-slate-800">{t('Bảo mật cao', 'High Security')}</h3>
-                        <p className="text-xs text-slate-500">{t('Giao dịch an toàn', 'Secure transactions')}</p>
+                      <Link to={`/products/${product.id}`} className="hover:text-blue-600">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-2 truncate">{product.name}</h3>
+                      </Link>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-blue-600 font-bold text-lg">
+                          ${product.price ? product.price.toLocaleString() : '0'}
+                        </span>
+                        {product.compare_at_price > product.price && (
+                          <span className="text-gray-400 line-through text-sm">
+                            ${product.compare_at_price.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                  </div>
                 </div>
-            </div>
+              );
+            })}
+          </div>
+        )}
+        
+        <div className="text-center mt-10">
+          <Link to="/products" className="inline-block bg-gray-900 text-white px-8 py-3 rounded-md hover:bg-gray-800 transition">
+            View All Products
+          </Link>
         </div>
-      </section>
-
-      {/* === PRODUCT LIST === */}
-      <h2 className="text-2xl font-bold mb-8 text-slate-800 flex items-center gap-2">
-          <ShoppingBag className="text-blue-600"/> {t('Sản phẩm mới nhất', 'Latest Products')}
-      </h2>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
-        {products.map((p) => {
-          const stock = stocks[p.id] || 0;
-          
-          return (
-            <div key={p.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
-              <Link to={`/product/${p.id}`}>
-                <div className="h-56 overflow-hidden bg-gray-100 relative">
-                  {p.images && p.images[0] ? (
-                    <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
-                  ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
-                  
-                  {/* Badge Tồn kho */}
-                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}>
-                     {stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Hết hàng', 'Out of Stock')}
-                  </div>
-                </div>
-              </Link>
-              
-              <div className="p-5 flex flex-col flex-grow">
-                <Link to={`/product/${p.id}`}>
-                  {/* Tên sản phẩm theo ngôn ngữ */}
-                  <h3 className="font-bold text-lg mb-2 text-slate-800 hover:text-blue-600 transition truncate">
-                      {lang === 'vi' ? p.title : (p.title_en || p.title)}
-                  </h3>
-                </Link>
-                
-                <div className="mt-auto">
-                  <div className="flex justify-between items-center mb-4">
-                     {/* Giá USDT */}
-                     <span className="text-green-600 font-bold text-xl">{p.price} USDT</span>
-                     
-                     {/* Badge loại sản phẩm */}
-                     {p.is_digital ? 
-                        <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 font-bold">DIGITAL</span> :
-                        <span className="text-[10px] bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-100 font-bold">PHYSICAL</span>
-                     }
-                  </div>
-
-                  <div className="flex gap-2">
-                     <button onClick={() => handleAddToCart(p)} className="flex-1 bg-white text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-50 transition border border-slate-200 text-sm">
-                        {t('Thêm giỏ', 'Add to Cart')}
-                     </button>
-                     <button onClick={() => handleBuyNow(p)} disabled={stock===0} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-sm">
-                        {t('Mua ngay', 'Buy Now')}
-                     </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )
-        })}
       </div>
     </div>
   );
-}
+};
+
+export default Home;
