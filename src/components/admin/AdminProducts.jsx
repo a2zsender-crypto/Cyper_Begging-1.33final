@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { Plus, Edit, X, Upload, Key, Settings, Image as ImageIcon, Layers } from 'lucide-react';
+import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
@@ -26,11 +26,11 @@ export default function AdminProducts() {
       const { data: allProds, error: prodError } = await supabase.from('products').select('id, physical_stock, is_digital');
       if (prodError) throw prodError;
 
-      // Lấy đếm thực tế từ bảng keys cho hàng Digital
       const { data: allKeys, error: keyError } = await supabase
         .from('product_keys')
         .select('product_id')
         .eq('is_used', false);
+      
       if (keyError) throw keyError;
 
       const map = {}; 
@@ -39,7 +39,6 @@ export default function AdminProducts() {
               const realCount = allKeys.filter(k => k.product_id === p.id).length;
               map[p.id] = realCount;
           } else {
-              // Physical dùng cột physical_stock
               map[p.id] = p.physical_stock || 0;
           }
       });
@@ -75,7 +74,6 @@ export default function AdminProducts() {
         const restGroups = groups.slice(1);
         let combinations = [];
         if(!firstGroup.options || firstGroup.options.length === 0) return generateCombinations(restGroups, prefix);
-        
         firstGroup.options.forEach(opt => {
             if (opt.label) combinations = combinations.concat(generateCombinations(restGroups, { ...prefix, [firstGroup.name]: opt.label }));
         });
@@ -93,44 +91,31 @@ export default function AdminProducts() {
         return existing || { options: combo, stock: 0 };
     });
 
-    const totalVariantStock = mergedStocks.reduce((sum, item) => sum + (parseInt(item.stock) || 0), 0);
-    
+    // Chỉ update nếu cấu trúc thay đổi để tránh reset stock khi đang nhập
     setProductForm(prev => {
-        const isSame = JSON.stringify(prev.variant_stocks?.map(x=>x.options)) === JSON.stringify(mergedStocks.map(x=>x.options));
-        if(isSame) {
-             // Nếu là hàng vật lý, tự cập nhật tổng stock khi variant stock thay đổi
-             if (!productForm.is_digital && prev.physical_stock !== totalVariantStock) {
-                 return { ...prev, physical_stock: totalVariantStock };
-             }
-             return prev;
-        }
+        const isSameStructure = JSON.stringify(prev.variant_stocks?.map(x=>x.options)) === JSON.stringify(mergedStocks.map(x=>x.options));
+        if(isSameStructure) return prev; // Không làm gì nếu cấu trúc y hệt
+        
+        // Nếu thay đổi cấu trúc, tính lại tổng stock
+        const totalVariantStock = mergedStocks.reduce((sum, item) => sum + (parseInt(item.stock) || 0), 0);
         return { 
             ...prev, 
             variant_stocks: mergedStocks,
-            // Nếu là vật lý, physical_stock = tổng stock các biến thể
-            physical_stock: productForm.is_digital ? prev.physical_stock : totalVariantStock 
+            physical_stock: prev.is_digital ? prev.physical_stock : totalVariantStock 
         };
     });
+  }, [productForm.variants]); // Bỏ dependencies thừa để tránh re-render
 
-  }, [productForm.variants, productForm.is_digital]); // Bỏ variant_stocks ra khỏi dependency để tránh loop
-
-  // Hàm update stock cho biến thể VẬT LÝ
+  // Update Stock cho hàng Vật lý
   const handleVariantStockChange = (idx, value) => {
-      // Chỉ cho phép sửa trực tiếp nếu là hàng vật lý
       if(productForm.is_digital) return; 
-      
       const newStocks = [...productForm.variant_stocks];
       newStocks[idx].stock = parseInt(value) || 0;
-      
       const total = newStocks.reduce((sum, item) => sum + item.stock, 0);
-      setProductForm(prev => ({ 
-          ...prev, 
-          variant_stocks: newStocks, 
-          physical_stock: total 
-      }));
+      setProductForm(prev => ({ ...prev, variant_stocks: newStocks, physical_stock: total }));
   };
 
-  // --- VARIANT HANDLERS ---
+  // --- HANDLERS CƠ BẢN (Add Variant, Image...) ---
   const addVariantGroup = () => setProductForm(prev => ({ ...prev, variants: [...(prev.variants || []), { name: '', options: [] }] }));
   const removeVariantGroup = (idx) => setProductForm(prev => { const n = [...prev.variants]; n.splice(idx, 1); return { ...prev, variants: n }; });
   const updateVariantName = (idx, val) => setProductForm(prev => { const n = [...prev.variants]; n[idx].name = val; return { ...prev, variants: n }; });
@@ -152,7 +137,6 @@ export default function AdminProducts() {
       } catch (err) { toast.error(err.message); } finally { setVariantUploading(false); }
   };
 
-  // --- BASIC HANDLERS ---
   const handleImageUpload = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -224,13 +208,13 @@ export default function AdminProducts() {
         if (!showKeyModal?.product) return;
         const currentProd = showKeyModal.product;
         let updatedPhysicalStock = 0;
-        let updatedVariantStocks = [];
+        let updatedVariantStocks = [...(productForm.variant_stocks || [])]; // Lấy từ form hiện tại để chuẩn nhất
 
         if (currentProd.is_digital) {
-            // ... Logic thêm Key (Giữ nguyên) ...
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
             
+            // Fix variant info structure
             let variantInfo = showKeyModal.variant ? { ...showKeyModal.variant } : {}; 
             const variantStr = showKeyModal.variant ? Object.values(showKeyModal.variant).join(' ') : '';
             const fullTitle = `${currentProd.title} ${variantStr}`.trim();
@@ -244,40 +228,47 @@ export default function AdminProducts() {
             if (error) throw error;
 
             const countToAdd = insertData.length;
-            const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
-            updatedPhysicalStock = (latestProd.physical_stock || 0) + countToAdd;
-            updatedVariantStocks = latestProd.variant_stocks || [];
-
+            
+            // Cập nhật stock ngay vào biến local để UI không bị nhảy
             if (showKeyModal.variant) {
                 const vIndex = updatedVariantStocks.findIndex(v => JSON.stringify(v.options) === JSON.stringify(showKeyModal.variant));
                 if (vIndex >= 0) {
-                    updatedVariantStocks[vIndex].stock = (parseInt(updatedVariantStocks[vIndex].stock) || 0) + countToAdd;
-                } else {
-                    updatedVariantStocks.push({ options: showKeyModal.variant, stock: countToAdd });
+                    const oldStock = parseInt(updatedVariantStocks[vIndex].stock) || 0;
+                    updatedVariantStocks[vIndex] = {
+                        ...updatedVariantStocks[vIndex],
+                        stock: oldStock + countToAdd
+                    };
                 }
             }
-            await supabase.from('products').update({ physical_stock: updatedPhysicalStock, variant_stocks: updatedVariantStocks }).eq('id', currentProd.id);
+            
+            // Cập nhật tổng
+            updatedPhysicalStock = (productForm.physical_stock || 0) + countToAdd;
+
+            // Đồng bộ DB products (để backup)
+            await supabase.from('products').update({ 
+                physical_stock: updatedPhysicalStock, 
+                variant_stocks: updatedVariantStocks 
+            }).eq('id', currentProd.id);
+
             toast.success(t(`Đã thêm ${countToAdd} Keys!`, `Added ${countToAdd} Keys!`));
         } else {
-            // ... Logic thêm kho Vật lý chung (Giữ nguyên) ...
+            // Logic vật lý
             const qtyToAdd = parseInt(stockInput);
-            if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn("Số lượng > 0");
-            const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
-            updatedPhysicalStock = (latestProd.physical_stock || 0) + qtyToAdd;
+            if (isNaN(qtyToAdd)) return;
+            updatedPhysicalStock = (productForm.physical_stock || 0) + qtyToAdd;
             await supabase.from('products').update({ physical_stock: updatedPhysicalStock }).eq('id', currentProd.id);
             toast.success("Đã cập nhật kho!");
         }
         
-        // Update state local
-        if (productForm.id === currentProd.id) {
-            setProductForm(prev => ({
-                ...prev,
-                physical_stock: updatedPhysicalStock,
-                variant_stocks: updatedVariantStocks.length > 0 ? updatedVariantStocks : prev.variant_stocks
-            }));
-        }
+        // Update Form State NGAY LẬP TỨC để tránh UI bị revert
+        setProductForm(prev => ({
+            ...prev,
+            physical_stock: updatedPhysicalStock,
+            variant_stocks: updatedVariantStocks
+        }));
 
         setKeyInput(''); setStockInput(0); setShowKeyModal(null);
+        // Invalidate queries để đồng bộ nền
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
         queryClient.invalidateQueries({ queryKey: ['admin-stock'] });
 
@@ -288,13 +279,11 @@ export default function AdminProducts() {
 
   return (
     <div className="animate-fade-in">
-       {/* Header */}
        <div className="flex justify-between mb-6 items-center">
          <h2 className="text-2xl font-bold text-slate-800">{t('Kho Sản Phẩm', 'Inventory')}</h2>
          <button onClick={openAddModal} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow hover:bg-blue-700 transition"><Plus size={18}/> {t('Thêm Mới', 'Add New')}</button>
        </div>
        
-       {/* Product Table */}
        <div className="bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
          <table className="w-full text-left">
            <thead className="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold tracking-wider"><tr><th className="p-4">Product</th><th className="p-4">Type</th><th className="p-4">API Mode</th><th className="p-4">Stock</th><th className="p-4">Action</th></tr></thead>
@@ -306,7 +295,6 @@ export default function AdminProducts() {
                     <div>
                         <span className="font-medium text-sm text-slate-700 block">{lang === 'vi' ? p.title : (p.title_en || p.title)}</span>
                         {lang !== 'vi' && p.title_en && <span className="text-xs text-slate-400 block">VN: {p.title}</span>}
-                        {p.variants?.length > 0 && <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">{p.variants.length} Option Groups</span>}
                     </div>
                  </td>
                  <td className="p-4 text-xs font-medium text-slate-500">{p.is_digital ? 'Digital' : 'Physical'}</td>
@@ -324,7 +312,6 @@ export default function AdminProducts() {
          </table>
        </div>
 
-       {/* MODAL EDIT PRODUCT */}
        {showProductModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
            <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-auto animate-scale-in">
@@ -333,7 +320,6 @@ export default function AdminProducts() {
                   <button onClick={() => setShowProductModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition"><X size={20}/></button>
               </div>
               <form onSubmit={handleSaveProduct} className="space-y-6">
-                 {/* ... (Giữ nguyên các Input cơ bản: Title, Price, Type) ... */}
                  <div className="grid grid-cols-2 gap-5">
                    <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (VN)</label><input required className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title} onChange={e=>setProductForm({...productForm, title: e.target.value})}/></div>
                    <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Title (EN)</label><input className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title_en} onChange={e=>setProductForm({...productForm, title_en: e.target.value})}/></div>
@@ -348,8 +334,7 @@ export default function AdminProducts() {
                          </select>
                     </div>
                  </div>
-                 
-                 {/* API Key Toggle (Digital Only) */}
+
                  {productForm.is_digital && (
                      <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-start gap-3">
                          <input type="checkbox" id="apiKeyToggle" className="mt-1 w-4 h-4" checked={productForm.allow_external_key} onChange={e => setProductForm({...productForm, allow_external_key: e.target.checked})} />
@@ -360,14 +345,11 @@ export default function AdminProducts() {
                      </div>
                  )}
                  
-                 {/* VARIANT CONFIGURATION */}
                  <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                     <div className="flex justify-between items-center mb-3">
                         <label className="block text-sm font-bold text-slate-700 flex items-center gap-2"><Settings size={16}/> Product Options (Variants)</label>
                         <button type="button" onClick={addVariantGroup} className="text-xs bg-slate-200 hover:bg-slate-300 px-3 py-1.5 rounded-lg font-bold transition">+ Add Option Group</button>
                     </div>
-                    
-                    {/* Danh sách nhóm biến thể (Size, Color...) - Giữ nguyên */}
                     <div className="space-y-4 mb-4">
                         {productForm.variants?.map((group, gIdx) => (
                             <div key={gIdx} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm relative group">
@@ -401,7 +383,7 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* SỬA: BẢNG QUẢN LÝ TỒN KHO BIẾN THỂ (Cho cả Digital và Physical) */}
+                    {/* HIỂN THỊ BẢNG TỒN KHO CHO CẢ 2 LOẠI (Vật lý & Digital) */}
                     {productForm.variants?.length > 0 && productForm.variant_stocks?.length > 0 && (
                         <div className="mt-6 border-t pt-4">
                              <label className="block text-sm font-bold text-slate-700 mb-2">Manage Stock per Variant</label>
@@ -414,10 +396,10 @@ export default function AdminProducts() {
                                                     <td className="p-3 font-medium text-slate-700">{Object.entries(item.options).map(([k, v]) => <span key={k} className="mr-2 px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs border border-purple-100">{k}: {v}</span>)}</td>
                                                     <td className="p-3 font-bold text-center">
                                                         {productForm.is_digital ? (
-                                                            // Digital: Chỉ hiển thị số lượng (Read-only vì tính theo keys)
+                                                            // Digital: Read-only
                                                             <span className="text-slate-600">{item.stock}</span>
                                                         ) : (
-                                                            // Physical: Cho phép nhập trực tiếp
+                                                            // Physical: Input nhập số
                                                             <input 
                                                                 type="number" 
                                                                 min="0"
@@ -468,7 +450,6 @@ export default function AdminProducts() {
                      </div>
                  )}
 
-                 {/* DESCRIPTION & IMAGES (Giữ nguyên) */}
                  <div className="grid grid-cols-2 gap-5">
                      <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Description (VN)</label><textarea className="w-full border p-2.5 rounded-lg h-28 resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.description} onChange={e=>setProductForm({...productForm, description: e.target.value})}></textarea></div>
                      <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Description (EN)</label><textarea className="w-full border p-2.5 rounded-lg h-28 resize-none focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" value={productForm.description_en} onChange={e=>setProductForm({...productForm, description_en: e.target.value})}></textarea></div>
@@ -493,8 +474,7 @@ export default function AdminProducts() {
            </div>
         </div>
       )}
-      
-      {/* KEY MODAL (Giữ nguyên) */}
+
       {showKeyModal && (
          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md animate-scale-in">
