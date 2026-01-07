@@ -6,13 +6,14 @@ import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
 
 export default function AdminProducts() {
-  const { t, lang } = useLang();
+  const { t, lang } = useLang(); 
   const queryClient = useQueryClient(); 
   
   // --- FETCH DATA ---
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
+      // Select * đã bao gồm title_en
       const { data, error } = await supabase.from('products').select('*').order('id', {ascending: false});
       if (error) throw error;
       return data;
@@ -23,9 +24,11 @@ export default function AdminProducts() {
   const { data: stockCounts = {} } = useQuery({
     queryKey: ['admin-stock'],
     queryFn: async () => {
+      // 1. Lấy danh sách sản phẩm để biết loại (digital/physical)
       const { data: allProds, error: prodError } = await supabase.from('products').select('id, physical_stock, is_digital');
       if (prodError) throw prodError;
 
+      // 2. Lấy tất cả key chưa dùng để đếm
       const { data: allKeys, error: keyError } = await supabase
         .from('product_keys')
         .select('product_id')
@@ -37,9 +40,11 @@ export default function AdminProducts() {
       
       allProds?.forEach(p => {
           if (p.is_digital) {
+              // Digital: Đếm thực tế từ bảng keys
               const realCount = allKeys.filter(k => k.product_id === p.id).length;
               map[p.id] = realCount;
           } else {
+              // Physical: Lấy từ cột physical_stock
               map[p.id] = p.physical_stock || 0;
           }
       });
@@ -112,7 +117,6 @@ export default function AdminProducts() {
 
   }, [productForm.variants, productForm.is_digital]);
 
-  // Handle thay đổi số lượng tồn kho cho Physical Variant
   const handleVariantStockChange = (idx, value) => {
       if(productForm.is_digital) return; 
       const newStocks = [...productForm.variant_stocks];
@@ -168,6 +172,7 @@ export default function AdminProducts() {
       setShowProductModal(true);
   };
   const openEditModal = (p) => {
+      // Dùng số liệu realtime đã tính toán được để hiển thị
       const realStock = p.is_digital ? (stockCounts[p.id] || 0) : (p.physical_stock || 0);
 
       setProductForm({
@@ -244,6 +249,7 @@ export default function AdminProducts() {
             const { error } = await supabase.from('product_keys').insert(insertData);
             if (error) throw error;
 
+            // Tính toán stock để update cache (nhưng UI sẽ dùng realtime count)
             const countToAdd = insertData.length;
             const { data: latestProd } = await supabase.from('products').select('*').eq('id', currentProd.id).single();
             
@@ -310,12 +316,15 @@ export default function AdminProducts() {
                  <td className="p-4 flex gap-3 items-center">
                     <img src={p.images?.[0]} className="w-10 h-10 rounded object-cover bg-slate-100 border"/> 
                     <div>
+                        {/* SỬA: Logic hiển thị tên đa ngôn ngữ */}
                         <span className="font-medium text-sm text-slate-700 block">
                             {lang === 'vi' ? p.title : (p.title_en || p.title)}
                         </span>
+                        {/* Hiển thị tên gốc nếu đang xem tiếng Anh */}
                         {lang !== 'vi' && p.title_en && (
                             <span className="text-xs text-slate-400 block">VN: {p.title}</span>
                         )}
+
                         {p.variants?.length > 0 && <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">{p.variants.length} Option Groups</span>}
                     </div>
                  </td>
@@ -407,7 +416,6 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* [SỬA] GIAO DIỆN QUẢN LÝ STOCK CHO DIGITAL - GIỮ NGUYÊN */}
                     {productForm.is_digital && productForm.variant_stocks.length > 0 && (
                         <div className="mt-6 border-t pt-4">
                              <label className="block text-sm font-bold text-slate-700 mb-2">Manage Keys per Variant</label>
@@ -431,10 +439,10 @@ export default function AdminProducts() {
                             </div>
                         </div>
                     )}
-                    
-                    {/* [SỬA] GIAO DIỆN QUẢN LÝ STOCK CHO PHYSICAL - MỚI THÊM */}
+
+                    {/* [ĐÃ THÊM] UI NHẬP SỐ LƯỢNG CHO SẢN PHẨM VẬT LÝ */}
                     {!productForm.is_digital && productForm.variant_stocks.length > 0 && (
-                         <div className="mt-6 border-t pt-4">
+                        <div className="mt-6 border-t pt-4">
                             <h4 className="font-bold mb-3 text-slate-700 flex items-center gap-2"><Layers size={16}/> Physical Variant Stock</h4>
                             <div className="bg-orange-50/50 rounded-xl border border-orange-100 p-4 space-y-2">
                                 {productForm.variant_stocks.map((item, idx) => (
@@ -451,6 +459,7 @@ export default function AdminProducts() {
                                                 min="0"
                                                 className="w-20 p-1.5 border border-slate-300 rounded-md text-center font-bold text-slate-700 focus:ring-2 focus:ring-orange-500 outline-none"
                                                 value={item.stock}
+                                                // GỌI HÀM CẬP NHẬT TỒN KHO TẠI ĐÂY
                                                 onChange={(e) => handleVariantStockChange(idx, e.target.value)}
                                             />
                                         </div>
