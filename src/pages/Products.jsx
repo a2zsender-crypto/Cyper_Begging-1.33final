@@ -32,25 +32,26 @@ const Products = () => {
     }
   };
 
-  // --- LOGIC SỬA LỖI STOCK (KHÔNG ĐỔI GIAO DIỆN) ---
+  // --- HÀM TÍNH TỒN KHO ĐỂ HIỂN THỊ ---
   const getStock = (product) => {
-    // 1. Nếu cho phép lấy key ngoài (API) -> Luôn In Stock
+    // 1. API -> Còn hàng
     if (product.allow_external_key) return 999;
 
-    // 2. Nếu là hàng Vật lý -> Lấy physical_stock
-    if (!product.is_digital) {
+    // 2. Vật lý -> Lấy kho vật lý
+    if (product.is_digital === false) {
       return product.physical_stock || 0;
     }
 
-    // 3. Nếu là hàng Số (Digital) -> Cộng tổng stock các biến thể
+    // 3. Digital -> Cộng tổng biến thể
     if (product.variant_stocks && Array.isArray(product.variant_stocks) && product.variant_stocks.length > 0) {
       return product.variant_stocks.reduce((total, v) => total + (Number(v.stock) || 0), 0);
     }
 
-    // Mặc định trả về 0 nếu không tìm thấy kho
-    return 0;
+    // Fallback: check physical_stock (cho trường hợp dữ liệu cũ)
+    return product.physical_stock || 0;
   };
 
+  // Logic lọc sản phẩm
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filter === 'all' 
@@ -63,14 +64,15 @@ const Products = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Header và Bộ lọc - Giữ nguyên gốc */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">Products</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Sản phẩm</h1>
         
         <div className="flex w-full md:w-auto gap-4">
           <div className="relative flex-grow md:flex-grow-0">
             <input
               type="text"
-              placeholder="Search products..."
+              placeholder="Tìm kiếm..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full"
@@ -83,9 +85,9 @@ const Products = () => {
             onChange={(e) => setFilter(e.target.value)}
             className="pl-4 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white"
           >
-            <option value="all">All Products</option>
-            <option value="digital">Digital Products</option>
-            <option value="physical">Physical Products</option>
+            <option value="all">Tất cả</option>
+            <option value="digital">Sản phẩm số</option>
+            <option value="physical">Sản phẩm vật lý</option>
           </select>
         </div>
       </div>
@@ -97,6 +99,7 @@ const Products = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map((product) => {
+            // Tính toán trạng thái
             const stock = getStock(product);
             const isOutOfStock = stock <= 0;
             const hasVariants = product.variants && product.variants.length > 0;
@@ -109,10 +112,11 @@ const Products = () => {
                     alt={product.title}
                     className="object-cover w-full h-full hover:scale-105 transition-transform duration-300"
                   />
+                  {/* Badge Hết hàng - Chỉ hiện khi thực sự hết hàng */}
                   {isOutOfStock && (
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                       <span className="bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wide">
-                        Out of Stock
+                        Hết hàng
                       </span>
                     </div>
                   )}
@@ -128,14 +132,16 @@ const Products = () => {
                   <div className="mt-auto pt-4 flex items-center justify-between">
                     <div>
                       <span className="text-xl font-bold text-blue-600">
-                        {product.price} USDT
+                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
                       </span>
                       <p className={`text-xs mt-1 ${isOutOfStock ? 'text-red-500' : 'text-green-600'}`}>
-                        {isOutOfStock ? 'Out of Stock' : 'In Stock'}
+                        {isOutOfStock ? 'Hết hàng' : 'Còn hàng'}
                       </p>
                     </div>
 
+                    {/* Logic nút mua hàng */}
                     {hasVariants ? (
+                      // Nếu có biến thể -> Bắt buộc vào trang chi tiết để chọn
                       <Link
                         to={`/products/${product.id}`}
                         className="p-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-blue-600 transition-colors"
@@ -143,6 +149,7 @@ const Products = () => {
                         <Filter className="w-5 h-5" />
                       </Link>
                     ) : (
+                      // Nếu không có biến thể -> Cho phép thêm nhanh vào giỏ
                       <button
                         onClick={() => addToCart(product)}
                         disabled={isOutOfStock}
