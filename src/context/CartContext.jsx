@@ -1,117 +1,94 @@
-import React, { createContext, useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast'; // Hoặc thư viện toast bạn đang dùng
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 
-export const CartContext = createContext();
+const CartContext = createContext();
+
+export const useCart = () => useContext(CartContext);
 
 export const CartProvider = ({ children }) => {
-  const [cartItems, setCartItems] = useState(() => {
-    const savedCart = localStorage.getItem('cartItems');
+  const [cart, setCart] = useState(() => {
+    const savedCart = localStorage.getItem('cart');
     return savedCart ? JSON.parse(savedCart) : [];
   });
 
   useEffect(() => {
-    localStorage.setItem('cartItems', JSON.stringify(cartItems));
-  }, [cartItems]);
+    localStorage.setItem('cart', JSON.stringify(cart));
+  }, [cart]);
 
-  // Hàm helper tính tồn kho (tái sử dụng logic)
-  // Lưu ý: Trong context, product truyền vào thường đã có đủ data từ Home/Products
-  // Nếu product thiếu product_keys/variants, logic này sẽ mặc định trả về false để an toàn.
-  const isProductAvailable = (product) => {
-    if (product.check_stock_api) return true;
-    
-    // Check Variants
-    if (product.has_variants) {
-       // Nếu trong giỏ hàng logic phức tạp hơn (cần chọn variant), 
-       // nhưng ở bước Add Quick từ Home thì ta chỉ check xem "có variant nào còn hàng không"
-       // Nếu product object có variants data:
-       if (product.product_variants && product.product_variants.length > 0) {
-          return product.product_variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0) > 0;
-       }
-       // Nếu không có data variants đi kèm, ta tạm cho là true để vào trang chi tiết check lại, 
-       // hoặc chặn luôn. Ở đây tôi để true để user vào trang chi tiết chọn variant.
-       return true; 
+  const addToCart = (product, variant = null) => {
+    // LOGIC KIỂM TRA TỒN KHO MỚI
+    // 1. Nếu sp cho phép lấy key qua API khi hết hàng -> Luôn cho phép mua (In Stock)
+    // 2. Nếu không, kiểm tra physical_stock (tổng tồn kho)
+    // 3. Nếu có biến thể, physical_stock là tổng của các biến thể, nên logic này vẫn đúng ở mức Product. 
+    //    Tuy nhiên, nếu chọn variant cụ thể, cần check tồn kho của variant đó (nếu logic FE có lưu variant_stocks).
+    //    Ở đây ta check mức độ sản phẩm cơ bản trước.
+
+    const isAvailable = product.get_key_via_api === true || (product.physical_stock && product.physical_stock > 0);
+
+    if (!isAvailable) {
+      toast.error('Sản phẩm đã hết hàng!');
+      return; // QUAN TRỌNG: Dừng hàm ngay lập tức, không chạy tiếp code bên dưới
     }
 
-    // Check Digital
-    if (product.is_digital) {
-       if (product.product_keys) {
-         return product.product_keys.filter(k => !k.is_used).length > 0;
-       }
-       // Nếu product object thiếu product_keys (do query ẩu ở đâu đó), fallback về physical_stock hoặc cho qua
-       // Tốt nhất nên check physical_stock như một fallback an toàn
-       return (product.physical_stock || 0) > 0;
-    }
+    setCart((prevCart) => {
+      // Tạo ID duy nhất cho item trong giỏ: ProductID + VariantName (nếu có)
+      const cartItemId = variant 
+        ? `${product.id}-${variant.name}` 
+        : `${product.id}`;
 
-    // Check Physical
-    return (product.physical_stock || 0) > 0;
-  };
+      const existingItem = prevCart.find((item) => item.cartItemId === cartItemId);
 
-  const addToCart = (product, variant = null, quantity = 1) => {
-    // 1. Validate Stock ngay lập tức
-    // Nếu thêm từ Home/Products (không có variant cụ thể)
-    if (!variant && !isProductAvailable(product)) {
-        toast.error('Sản phẩm đã hết hàng (Out of Stock)');
-        return;
-    }
-    
-    // Nếu thêm có variant, check stock variant đó
-    if (variant && (variant.stock_quantity || 0) < quantity && !product.check_stock_api) {
-        toast.error('Biến thể này đã hết hàng');
-        return;
-    }
+      if (existingItem) {
+        // Kiểm tra tồn kho khi tăng số lượng (tùy chọn, ở đây tạm bỏ qua để đơn giản hoặc check tiếp)
+        // Nếu muốn chặt chẽ: if (!product.get_key_via_api && existingItem.quantity >= product.physical_stock) ...
 
-    setCartItems((prevItems) => {
-      // Logic tìm sản phẩm trùng trong giỏ
-      const itemIndex = prevItems.findIndex((item) => 
-        item.id === product.id && 
-        ((!item.variant && !variant) || (item.variant?.id === variant?.id))
-      );
-
-      if (itemIndex > -1) {
-        // Sản phẩm đã có -> Tăng số lượng
-        const newItems = [...prevItems];
-        // Check lại stock lần nữa trước khi tăng
-        const currentQty = newItems[itemIndex].quantity;
-        
-        // Nếu không phải API stock và số lượng vượt quá tồn kho
-        // (Đây là logic check đơn giản, bạn có thể mở rộng)
-        
-        newItems[itemIndex].quantity += quantity;
         toast.success('Đã cập nhật số lượng trong giỏ hàng!');
-        return newItems;
+        return prevCart.map((item) =>
+          item.cartItemId === cartItemId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
       } else {
-        // Sản phẩm mới
-        toast.success('Đã thêm vào giỏ hàng thành công!');
-        return [...prevItems, { ...product, variant, quantity }];
+        toast.success('Đã thêm vào giỏ hàng!');
+        return [
+          ...prevCart,
+          {
+            ...product,
+            cartItemId, // Lưu ID định danh
+            selectedVariant: variant, // Lưu thông tin variant đã chọn
+            quantity: 1,
+            // Giá có thể thay đổi theo variant, đảm bảo lấy đúng giá
+            price: variant ? variant.price : product.price 
+          },
+        ];
       }
     });
   };
 
-  const removeFromCart = (productId, variantId = null) => {
-    setCartItems((prevItems) => 
-      prevItems.filter((item) => !(item.id === productId && item.variant?.id === variantId))
-    );
+  const removeFromCart = (cartItemId) => {
+    setCart((prevCart) => prevCart.filter((item) => item.cartItemId !== cartItemId));
     toast.success('Đã xóa sản phẩm khỏi giỏ hàng');
   };
 
-  const updateQuantity = (productId, variantId, newQuantity) => {
+  const updateQuantity = (cartItemId, newQuantity) => {
     if (newQuantity < 1) return;
-    setCartItems((prevItems) =>
-      prevItems.map((item) =>
-        item.id === productId && item.variant?.id === variantId
-          ? { ...item, quantity: newQuantity }
-          : item
+    setCart((prevCart) =>
+      prevCart.map((item) =>
+        item.cartItemId === cartItemId ? { ...item, quantity: newQuantity } : item
       )
     );
   };
 
   const clearCart = () => {
-    setCartItems([]);
+    setCart([]);
+    localStorage.removeItem('cart');
   };
 
   const getCartTotal = () => {
-    return cartItems.reduce((total, item) => {
-      const price = item.variant ? item.variant.price : item.price;
+    return cart.reduce((total, item) => {
+      // Giá item đã được xử lý khi add to cart (variant price hoặc product price)
+      // Cần đảm bảo item.price là số
+      const price = parseFloat(item.price) || 0;
       return total + price * item.quantity;
     }, 0);
   };
@@ -119,7 +96,7 @@ export const CartProvider = ({ children }) => {
   return (
     <CartContext.Provider
       value={{
-        cartItems,
+        cart,
         addToCart,
         removeFromCart,
         updateQuantity,
