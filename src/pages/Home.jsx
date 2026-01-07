@@ -1,187 +1,149 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { ShoppingCart, ArrowRight, Star, Zap, Shield, Headset } from 'lucide-react';
 import { useLang } from '../context/LangContext';
+import { Zap, Wallet, ShieldCheck, ShoppingBag } from 'lucide-react'; // Thêm icon mới
 
-const Home = () => {
+export default function Home() {
   const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [stocks, setStocks] = useState({});
   const { addToCart } = useCart();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchProducts();
+    // Lấy danh sách sản phẩm
+    supabase.from('products').select('*').order('id', { ascending: false }).then(({ data }) => setProducts(data || []));
+    
+    // Lấy tồn kho
+    supabase.from('product_stock').select('*').then(({ data }) => {
+       const map = {};
+       data?.forEach(s => map[s.product_id] = s.stock_count);
+       setStocks(map);
+    });
   }, []);
 
-  const fetchProducts = async () => {
-    try {
-      // Lấy 8 sản phẩm mới nhất
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(8);
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching products:', error.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleAddToCart = (p) => {
+      addToCart(p);
+      alert(t("Đã thêm vào giỏ hàng!", "Added to cart successfully!"));
   };
 
-  const features = [
-    {
-      icon: <Zap className="w-6 h-6 text-yellow-500" />,
-      title: t('instantDelivery'),
-      description: t('instantDeliveryDesc')
-    },
-    {
-      icon: <Shield className="w-6 h-6 text-green-500" />,
-      title: t('securePayment'),
-      description: t('securePaymentDesc')
-    },
-    {
-      icon: <Headset className="w-6 h-6 text-blue-500" />,
-      title: t('support247'),
-      description: t('support247Desc')
-    }
-  ];
+  const handleBuyNow = (p) => {
+      addToCart(p);
+      navigate('/cart');
+  }
 
   return (
-    <div className="space-y-12">
-      {/* Hero Section */}
-      <section className="relative bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl overflow-hidden shadow-2xl">
-        <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
-        <div className="relative px-8 py-16 md:py-24 text-center text-white">
-          <h1 className="text-4xl md:text-6xl font-bold mb-6 tracking-tight">
-            {t('heroTitle')}
-          </h1>
-          <p className="text-lg md:text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
-            {t('heroSubtitle')}
-          </p>
-          <Link
-            to="/products"
-            className="inline-flex items-center px-8 py-4 bg-white text-blue-600 rounded-full font-bold text-lg hover:bg-blue-50 transition-colors shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-          >
-            {t('shopNow')}
-            <ArrowRight className="ml-2 w-5 h-5" />
-          </Link>
-        </div>
-      </section>
+    <div>
+      {/* === HERO SECTION (MỚI) === */}
+      <section className="py-16 mb-12 bg-gradient-to-b from-blue-50 to-white rounded-3xl">
+        <div className="text-center max-w-3xl mx-auto px-4">
+            <h1 className="text-4xl md:text-5xl font-extrabold text-slate-800 mb-4 tracking-tight">
+                {t('Mua sắm với', 'Shop with')} <span className="text-blue-600">Crypto</span>
+            </h1>
+            <p className="text-slate-500 text-lg mb-10 leading-relaxed">
+                {t(
+                    'Sản phẩm số và vật lý chất lượng cao với thanh toán cryptocurrency an toàn qua Oxapay.',
+                    'High quality digital and physical products with secure cryptocurrency payments via Oxapay.'
+                )}
+            </p>
 
-      {/* Features Section */}
-      <section className="grid md:grid-cols-3 gap-8">
-        {features.map((feature, index) => (
-          <div key={index} className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100 dark:border-gray-700">
-            <div className="bg-gray-50 dark:bg-gray-700 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
-              {feature.icon}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                {/* Feature 1 */}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white flex-shrink-0">
+                        <Zap size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-800">{t('Giao hàng nhanh', 'Fast Delivery')}</h3>
+                        <p className="text-xs text-slate-500">{t('Sản phẩm số tức thì', 'Instant digital items')}</p>
+                    </div>
+                </div>
+
+                {/* Feature 2 */}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600 flex-shrink-0">
+                        <Wallet size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-800">{t('Thanh toán Crypto', 'Crypto Payment')}</h3>
+                        <p className="text-xs text-slate-500">USDT, BTC, ETH</p>
+                    </div>
+                </div>
+
+                {/* Feature 3 */}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 flex-shrink-0">
+                        <ShieldCheck size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-800">{t('Bảo mật cao', 'High Security')}</h3>
+                        <p className="text-xs text-slate-500">{t('Giao dịch an toàn', 'Secure transactions')}</p>
+                    </div>
+                </div>
             </div>
-            <h3 className="text-xl font-bold mb-2 dark:text-white">{feature.title}</h3>
-            <p className="text-gray-600 dark:text-gray-300">{feature.description}</p>
-          </div>
-        ))}
+        </div>
       </section>
 
-      {/* Latest Products Section */}
-      <section>
-        <div className="flex justify-between items-end mb-8">
-          <div>
-            <h2 className="text-3xl font-bold dark:text-white">{t('latestProducts')}</h2>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">{t('latestProductsDesc')}</p>
-          </div>
-          <Link to="/products" className="text-blue-600 hover:text-blue-700 font-medium flex items-center">
-            {t('viewAll')} <ArrowRight className="w-4 h-4 ml-1" />
-          </Link>
-        </div>
-
-        {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-lg animate-pulse">
-                <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 rounded-xl mb-4" />
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-2" />
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {products.map((product) => {
-              // --- FIX LOGIC HIỂN THỊ STOCK ---
-              // Chỉ hiện Out of Stock khi: KHÔNG bật API VÀ (physical_stock <= 0 hoặc null)
-              const isAvailable = product.get_key_via_api === true || (product.physical_stock && product.physical_stock > 0);
-
-              return (
-                <div key={product.id} className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 border border-gray-100 dark:border-gray-700 overflow-hidden flex flex-col">
-                  <Link to={`/products/${product.id}`} className="relative block aspect-[4/3] overflow-hidden">
-                    <img
-                      src={product.image_url || 'https://via.placeholder.com/400x300?text=No+Image'}
-                      alt={product.name}
-                      className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500"
-                    />
-                    
-                    {/* Badge Stock */}
-                    {!isAvailable && (
-                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                        <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
-                          {t('outOfStock')}
-                        </span>
-                      </div>
-                    )}
-                    {isAvailable && (
-                      <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">
-                        {t('inStock')}
-                      </div>
-                    )}
-                  </Link>
+      {/* === PRODUCT LIST === */}
+      <h2 className="text-2xl font-bold mb-8 text-slate-800 flex items-center gap-2">
+          <ShoppingBag className="text-blue-600"/> {t('Sản phẩm mới nhất', 'Latest Products')}
+      </h2>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
+        {products.map((p) => {
+          const stock = stocks[p.id] || 0;
+          
+          return (
+            <div key={p.id} className="bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-xl transition duration-300 border border-slate-100 flex flex-col group">
+              <Link to={`/product/${p.id}`}>
+                <div className="h-56 overflow-hidden bg-gray-100 relative">
+                  {p.images && p.images[0] ? (
+                    <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500" />
+                  ) : <div className="flex items-center justify-center h-full text-gray-400">No Image</div>}
                   
-                  <div className="p-5 flex-1 flex flex-col">
-                    <div className="flex items-center space-x-1 mb-2">
-                      <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                      <span className="text-sm text-gray-500 dark:text-gray-400">4.9 (128)</span>
-                    </div>
-                    
-                    <Link to={`/products/${product.id}`} className="block mb-2">
-                      <h3 className="text-lg font-bold text-gray-900 dark:text-white line-clamp-2 hover:text-blue-600 transition-colors">
-                        {product.name}
-                      </h3>
-                    </Link>
-                    
-                    <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-4 flex-1">
-                      {product.description}
-                    </p>
-                    
-                    <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100 dark:border-gray-700">
-                      <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
-                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
-                      </span>
-                      
-                      <button
-                        onClick={() => addToCart(product)}
-                        disabled={!isAvailable}
-                        className={`p-2 rounded-xl transition-colors ${
-                          isAvailable
-                            ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-blue-600 hover:text-white'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        }`}
-                        title={isAvailable ? t('addToCart') : t('outOfStock')}
-                      >
-                        <ShoppingCart className="w-5 h-5" />
-                      </button>
-                    </div>
+                  {/* Badge Tồn kho */}
+                  <div className={`absolute top-2 right-2 px-2 py-1 text-[10px] font-bold rounded text-white ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}>
+                     {stock > 0 ? `${t('Sẵn hàng', 'In Stock')}: ${stock}` : t('Hết hàng', 'Out of Stock')}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+              </Link>
+              
+              <div className="p-5 flex flex-col flex-grow">
+                <Link to={`/product/${p.id}`}>
+                  {/* Tên sản phẩm theo ngôn ngữ */}
+                  <h3 className="font-bold text-lg mb-2 text-slate-800 hover:text-blue-600 transition truncate">
+                      {lang === 'vi' ? p.title : (p.title_en || p.title)}
+                  </h3>
+                </Link>
+                
+                <div className="mt-auto">
+                  <div className="flex justify-between items-center mb-4">
+                     {/* Giá USDT */}
+                     <span className="text-green-600 font-bold text-xl">{p.price} USDT</span>
+                     
+                     {/* Badge loại sản phẩm */}
+                     {p.is_digital ? 
+                        <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 font-bold">DIGITAL</span> :
+                        <span className="text-[10px] bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-100 font-bold">PHYSICAL</span>
+                     }
+                  </div>
+
+                  <div className="flex gap-2">
+                     <button onClick={() => handleAddToCart(p)} className="flex-1 bg-white text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-50 transition border border-slate-200 text-sm">
+                        {t('Thêm giỏ', 'Add to Cart')}
+                     </button>
+                     <button onClick={() => handleBuyNow(p)} disabled={stock===0} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition disabled:bg-gray-300 shadow-md text-sm">
+                        {t('Mua ngay', 'Buy Now')}
+                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   );
-};
-
-export default Home;
+}
