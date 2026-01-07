@@ -8,6 +8,7 @@ import { toast } from 'react-toastify';
 export default function AdminContacts({ session, role, activeTicketId }) {
   const { t } = useLang();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams(); // [MỚI] Lấy params từ URL
   const [contacts, setContacts] = useState([]);
   const [showTicketModal, setShowTicketModal] = useState(null);
   const [ticketReplies, setTicketReplies] = useState([]);
@@ -18,25 +19,33 @@ export default function AdminContacts({ session, role, activeTicketId }) {
     fetchContacts();
   }, [role, session]);
 
-  // LOGIC 1: MỞ TICKET KHI MOUNT (Nếu có prop activeTicketId)
+  // LOGIC 1: MỞ TICKET TỰ ĐỘNG (Từ Props HOẶC từ URL)
+  // [ĐÃ SỬA] Kết hợp cả activeTicketId (props) và ticketId (URL) để xử lý trường hợp F5
   useEffect(() => {
-      // Chờ contacts load xong mới mở
-      if (activeTicketId && contacts.length > 0) {
-          const ticket = contacts.find(c => c.id.toString() === activeTicketId);
-          if (ticket) openTicketChat(ticket);
-      }
-  }, [activeTicketId, contacts]);
+      const urlTicketId = searchParams.get('ticketId');
+      const targetId = activeTicketId || urlTicketId;
 
-  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (ĐỂ MỞ KHI ĐANG Ở TRANG NÀY)
+      // Chỉ mở khi danh sách contacts đã load xong và có targetId
+      if (targetId && contacts.length > 0) {
+          const ticket = contacts.find(c => c.id.toString() === targetId);
+          if (ticket) {
+              // Kiểm tra nếu chưa mở thì mới mở để tránh loop
+              if (!showTicketModal || showTicketModal.id !== ticket.id) {
+                  openTicketChat(ticket);
+              }
+          }
+      }
+  }, [activeTicketId, contacts, searchParams]);
+
+  // LOGIC 2: LẮNG NGHE SỰ KIỆN TỪ LAYOUT (Xử lý khi click thông báo mà không reload trang)
   useEffect(() => {
       const handleForceOpen = (e) => {
           const ticketId = e.detail;
-          // Tìm trong list hiện tại
           const ticket = contacts.find(c => c.id.toString() === ticketId);
           if (ticket) {
               openTicketChat(ticket);
           } else {
-              // Nếu không thấy (có thể là ticket mới), fetch lại rồi mở
+              // Nếu ticket chưa có trong list (mới tạo), fetch lại rồi mở
               fetchContacts().then((data) => {
                   const newTicket = data?.find(c => c.id.toString() === ticketId);
                   if (newTicket) openTicketChat(newTicket);
@@ -51,14 +60,17 @@ export default function AdminContacts({ session, role, activeTicketId }) {
   // Scroll to bottom
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies]);
 
-  // REALTIME
+  // REALTIME CONTACTS LIST
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts-list')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, 
-          (payload) => { setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); })
+          (payload) => { 
+              setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c)); 
+          })
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, 
           (payload) => {
+              // Chỉ thêm vào list nếu là Admin hoặc là chính chủ sở hữu ticket
               if (role === 'admin' || (role === 'user' && payload.new.email === session.user.email)) {
                   setContacts(prev => [payload.new, ...prev]);
                   toast.info("Có tin nhắn hỗ trợ mới!");
@@ -68,7 +80,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT
+  // REALTIME CHAT MESSAGES
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-room-${showTicketModal.id}`)
@@ -97,6 +109,7 @@ export default function AdminContacts({ session, role, activeTicketId }) {
       const { data } = await supabase.from('contact_replies').select('*').eq('contact_id', ticket.id).order('created_at', { ascending: true });
       setTicketReplies(data || []);
       
+      // Admin mở thì tự động đánh dấu processed
       if (role === 'admin' && ticket.status === 'new') {
           await supabase.from('contacts').update({ status: 'processed' }).eq('id', ticket.id);
       }
