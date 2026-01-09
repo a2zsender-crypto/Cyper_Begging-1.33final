@@ -5,10 +5,10 @@ import {
   Clock, CheckCircle, XCircle, AlertTriangle, Package, Calendar 
 } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { useLang } from '../../context/LangContext';
+import { useLang } from '../../context/LangContext'; // Import context ngôn ngữ
 
 const AdminOrders = () => {
-  const { t, lang } = useLang();
+  const { t, lang } = useLang(); // Sử dụng hook ngôn ngữ
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null); 
@@ -24,17 +24,20 @@ const AdminOrders = () => {
   const fetchOrders = async () => {
     setLoading(true);
     try {
+      // Đảm bảo query lấy đủ thông tin order_items và products
       let query = supabase
         .from('orders')
         .select(`
           *,
           order_items (
-            *,
+            quantity,
+            price_at_purchase,
+            product_name,
+            variant_name,
             products (
               title,
               title_en,
-              images,
-              price
+              images
             )
           )
         `, { count: 'exact' })
@@ -315,10 +318,10 @@ const AdminOrders = () => {
                     </thead>
                     <tbody className="divide-y">
                       {selectedOrder.order_items?.map((item, idx) => {
-                        // Logic hiển thị tên sản phẩm + biến thể
-                        const displayName = item.product_name || item.name || item.products?.title || 'Unknown Product';
-                        const originalName = item.products?.title;
-                        const isVariant = displayName !== originalName;
+                        // Logic hiển thị: Ưu tiên tên lưu trong item (snapshot) rồi mới tới tên từ bảng products
+                        const displayName = item.product_name || item.products?.title || 'Unknown Product';
+                        // Logic hiển thị biến thể: lấy từ variant_name lưu trong item
+                        const variantInfo = item.variant_name; 
 
                         return (
                           <tr key={idx} className="hover:bg-slate-50">
@@ -331,8 +334,8 @@ const AdminOrders = () => {
                                   <div className="font-medium text-slate-900">
                                     {displayName}
                                   </div>
-                                  {isVariant && originalName && (
-                                    <div className="text-xs text-slate-400">{t('Gốc:', 'Original:')} {originalName}</div>
+                                  {variantInfo && (
+                                    <div className="text-xs text-slate-400">{t('Loại:', 'Variant:')} {variantInfo}</div>
                                   )}
                                 </div>
                               </div>
