@@ -1,12 +1,76 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabaseClient';
 import { 
-  Search, Eye, Filter, ChevronLeft, ChevronRight, 
-  Clock, CheckCircle, XCircle, AlertTriangle, Package, Calendar, Key, Copy 
+  Search, Eye, EyeOff, Filter, ChevronLeft, ChevronRight, 
+  Clock, CheckCircle, XCircle, AlertTriangle, Package, Key, Copy, X
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useLang } from '../../context/LangContext';
 
+// --- COMPONENT CON: HIỂN THỊ KEY BẢO MẬT ---
+const MaskedKeyDisplay = ({ text, t }) => {
+    const [isVisible, setIsVisible] = useState(false);
+
+    const getMaskedText = (rawText) => {
+        if (!rawText) return '';
+        // Tách từng dòng (đề phòng key lưu dạng nhiều dòng)
+        return rawText.split('\n').map(line => {
+            // Chỉ che nếu dòng đó đủ dài (tránh che mất serial ngắn)
+            if (line.length > 15) {
+                const start = line.substring(0, 10); // Lấy 10 ký tự đầu (VD: "Key: ABCD-")
+                const end = line.substring(line.length - 4); // Lấy 4 ký tự cuối
+                return `${start}••••••••${end}`;
+            }
+            return line;
+        }).join('\n');
+    };
+
+    const copyToClipboard = (txt) => {
+        navigator.clipboard.writeText(txt);
+        toast.success(t('Đã copy mã (Full)!', 'Copied full key!'));
+    };
+
+    return (
+        <div className="mt-2 p-3 bg-green-50 border border-green-100 rounded-lg text-sm group relative">
+            <div className="font-bold text-green-700 flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1">
+                    <Key size={14}/> {t('Mã bản quyền / Key:', 'License Key:')}
+                </div>
+                <div className="flex gap-2">
+                    {/* Nút Ẩn/Hiện */}
+                    <button 
+                        onClick={() => setIsVisible(!isVisible)}
+                        className="text-green-600 hover:bg-green-100 p-1 rounded transition"
+                        title={isVisible ? "Che đi" : "Xem đầy đủ"}
+                    >
+                        {isVisible ? <EyeOff size={16}/> : <Eye size={16}/>}
+                    </button>
+                    {/* Nút Copy */}
+                    <button 
+                        onClick={() => copyToClipboard(text)}
+                        className="text-green-600 hover:bg-green-100 p-1 rounded transition"
+                        title="Copy Full"
+                    >
+                        <Copy size={16}/>
+                    </button>
+                </div>
+            </div>
+
+            {/* Nội dung Key */}
+            <div className="font-mono text-slate-700 whitespace-pre-line break-all">
+                {isVisible ? text : getMaskedText(text)}
+            </div>
+            
+            {!isVisible && (
+                <div className="text-[10px] text-green-600/70 italic mt-1 select-none">
+                    * {t('Đã che một phần để bảo mật.', 'Masked for security.')}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- COMPONENT CHÍNH ---
 const AdminOrders = () => {
   const { t, lang } = useLang();
   const [orders, setOrders] = useState([]);
@@ -49,8 +113,7 @@ const AdminOrders = () => {
         query = query.or(`customer_email.ilike.%${searchTerm}%,oxapay_track_id.ilike.%${searchTerm}%`);
       }
 
-      const { data, error, count } = await query;
-
+      const { data, error } = await query;
       if (error) throw error;
       setOrders(data || []);
     } catch (error) {
@@ -105,12 +168,6 @@ const AdminOrders = () => {
       paid: t('Đã thanh toán', 'Paid'),
       completed: t('Hoàn thành', 'Completed'),
       expired: t('Hết hạn', 'Expired'),
-  };
-
-  // Helper copy key
-  const copyToClipboard = (text) => {
-      navigator.clipboard.writeText(text);
-      toast.success(t('Đã copy mã!', 'Copied!'));
   };
 
   return (
@@ -254,23 +311,9 @@ const AdminOrders = () => {
                                 <div className="font-medium text-slate-900 text-base">{displayName}</div>
                                 {variantInfo && <div className="text-xs text-slate-500 bg-slate-100 w-fit px-2 py-0.5 rounded">{variantInfo}</div>}
                                 
-                                {/* --- PHẦN HIỂN THỊ KEY/CODE (MỚI THÊM) --- */}
+                                {/* --- SỬ DỤNG COMPONENT MASKED KEY --- */}
                                 {(selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && item.assigned_key && (
-                                    <div className="mt-2 p-3 bg-green-50 border border-green-100 rounded-lg text-sm group relative">
-                                        <div className="font-bold text-green-700 flex items-center gap-1 mb-1">
-                                            <Key size={14}/> {t('Mã bản quyền / Key:', 'Your License Key:')}
-                                        </div>
-                                        <div className="font-mono text-slate-700 whitespace-pre-line break-all">
-                                            {item.assigned_key}
-                                        </div>
-                                        <button 
-                                            onClick={() => copyToClipboard(item.assigned_key)}
-                                            className="absolute top-2 right-2 p-1.5 text-green-600 hover:bg-green-100 rounded transition opacity-0 group-hover:opacity-100"
-                                            title="Copy"
-                                        >
-                                            <Copy size={14}/>
-                                        </button>
-                                    </div>
+                                    <MaskedKeyDisplay text={item.assigned_key} t={t} />
                                 )}
                               </div>
                             </td>
