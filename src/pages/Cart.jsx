@@ -109,7 +109,7 @@ export default function Cart() {
           // Gọi Edge Function
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  cart: itemsPayload, // <--- ĐÃ SỬA: Đổi key 'items' thành 'cart' để khớp Backend
+                  items: itemsPayload, // <--- ĐÃ SỬA: Đổi key 'items' thành 'cart' để khớp Backend
                   email: formData.email,
                   name: formData.name,
                   contactMethod: formData.contactMethod,
