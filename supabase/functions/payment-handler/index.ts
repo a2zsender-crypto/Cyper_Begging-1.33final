@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // 1. Xử lý Preflight Request (OPTIONS)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -18,22 +17,18 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // 2. Parse dữ liệu từ Client
     let body;
     try { body = await req.json(); } catch { throw new Error("Invalid JSON body"); }
 
     const { items, email, name, contactMethod, contactInfo, shippingAddress, phoneNumber, language } = body;
 
-    // Validate cơ bản
     if (!items || !Array.isArray(items) || items.length === 0) throw new Error("Giỏ hàng trống");
     if (!email) throw new Error("Thiếu email khách hàng");
 
-    // 3. Lấy Merchant Key
     const { data: config } = await supabase.from('app_config').select('value').eq('key', 'OXAPAY_MERCHANT_KEY').single();
     if (!config?.value) throw new Error("Chưa cấu hình Merchant Key");
     const merchantKey = config.value;
 
-    // 4. Tính toán tổng tiền & xử lý biến thể
     let totalAmount = 0;
     const orderItemsData = [];
     let descriptionParts = [];
@@ -48,8 +43,6 @@ serve(async (req) => {
       if (!product) continue;
 
       let unitPrice = product.price;
-
-      // Logic giá biến thể
       if (item.price && parseFloat(item.price) !== product.price) {
           unitPrice = parseFloat(item.price);
       }
@@ -67,13 +60,12 @@ serve(async (req) => {
         quantity: item.quantity,
         price_at_purchase: unitPrice,
         name: finalDisplayName,
-        product_name: finalDisplayName // Backup cho admin panel
+        product_name: finalDisplayName
       });
     }
 
     if (totalAmount <= 0) throw new Error("Tổng tiền không hợp lệ");
 
-    // 5. Tạo đơn hàng (Pending)
     const { data: order, error: orderError } = await supabase.from('orders').insert({
         amount: totalAmount,
         customer_email: email,
@@ -87,7 +79,6 @@ serve(async (req) => {
 
     if (orderError) throw orderError;
 
-    // Insert chi tiết đơn hàng
     const itemsToInsert = orderItemsData.map(i => ({ 
         order_id: order.id,
         product_id: i.product_id,
@@ -96,7 +87,6 @@ serve(async (req) => {
         product_name: i.product_name 
     }));
     
-    // Xử lý fallback nếu DB chưa có cột product_name
     const { error: itemsError } = await supabase.from('order_items').insert(itemsToInsert);
     if (itemsError) {
         const basicItems = orderItemsData.map(i => ({
@@ -108,12 +98,11 @@ serve(async (req) => {
         await supabase.from('order_items').insert(basicItems);
     }
 
-    // 6. GỌI API OXAPAY V1 (SANDBOX MODE)
-    // Tài liệu mới: Dùng API v1, Header Key, Snake_case params, Sandbox: true
+    // --- SỬA ĐỔI QUAN TRỌNG THEO DOCS ---
     const oxapayPayload = {
       amount: totalAmount,
       currency: 'USDT',
-      life_time: 60, // API v1 dùng snake_case
+      life_time: 60,
       fee_paid_by_payer: 0,
       under_paid_cover: 0,
       return_url: `${req.headers.get('origin')}/success?orderId=${order.id}`,
@@ -121,16 +110,18 @@ serve(async (req) => {
       order_id: order.id.toString(),
       description: descriptionParts.join(', ').substring(0, 100),
       email: email,
-      sandbox: true // <--- KÍCH HOẠT CHẾ ĐỘ SANDBOX
+      sandbox: true // Sandbox Mode
     };
 
-    console.log("Sending to OxaPay v1 (Sandbox):", JSON.stringify(oxapayPayload));
+    console.log("Sending to OxaPay v1 (Invoice):", JSON.stringify(oxapayPayload));
 
-    const oxapayRes = await fetch('https://api.oxapay.com/v1/payment/request', {
+    // 1. Sửa Endpoint thành /invoice
+    const oxapayRes = await fetch('https://api.oxapay.com/v1/payment/invoice', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'merchant-api-key': merchantKey // Key truyền qua Header
+        // 2. Sửa Header key thành 'merchant_api_key' (underscore)
+        'merchant_api_key': merchantKey 
       },
       body: JSON.stringify(oxapayPayload)
     });
@@ -138,18 +129,14 @@ serve(async (req) => {
     const oxapayData = await oxapayRes.json();
     console.log("OxaPay Response:", oxapayData);
 
-    // Kiểm tra kết quả theo chuẩn API v1
-    if (oxapayData.status !== 200 && oxapayData.message !== 'success') {
+    if (oxapayData.status !== 200) {
       throw new Error(oxapayData.message || "Lỗi khởi tạo thanh toán OxaPay");
     }
     
-    // Lấy link thanh toán từ data
     const { track_id, payment_url } = oxapayData.data;
 
-    // Cập nhật TrackID
     await supabase.from('orders').update({ oxapay_track_id: track_id }).eq('id', order.id);
 
-    // Trả về link cho Client
     return new Response(JSON.stringify({ payUrl: payment_url }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200
