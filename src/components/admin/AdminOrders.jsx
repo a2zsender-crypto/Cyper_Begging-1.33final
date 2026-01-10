@@ -1,344 +1,242 @@
-import React, { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { 
-  Search, Eye, EyeOff, Filter, ChevronLeft, ChevronRight, 
-  Clock, CheckCircle, XCircle, AlertTriangle, Package, Key, Copy, X
-} from 'lucide-react';
-import { toast } from 'react-toastify';
-import { useLang } from '../../context/LangContext';
 
-// --- COMPONENT CON: HIỂN THỊ KEY BẢO MẬT ---
-const MaskedKeyDisplay = ({ text, t }) => {
-    const [isVisible, setIsVisible] = useState(false);
-
-    const getMaskedText = (rawText) => {
-        if (!rawText) return '';
-        // Tách từng dòng (đề phòng key lưu dạng nhiều dòng)
-        return rawText.split('\n').map(line => {
-            // Chỉ che nếu dòng đó đủ dài (tránh che mất serial ngắn)
-            if (line.length > 15) {
-                const start = line.substring(0, 10); // Lấy 10 ký tự đầu (VD: "Key: ABCD-")
-                const end = line.substring(line.length - 4); // Lấy 4 ký tự cuối
-                return `${start}••••••••${end}`;
-            }
-            return line;
-        }).join('\n');
-    };
-
-    const copyToClipboard = (txt) => {
-        navigator.clipboard.writeText(txt);
-        toast.success(t('Đã copy mã (Full)!', 'Copied full key!'));
-    };
-
-    return (
-        <div className="mt-2 p-3 bg-green-50 border border-green-100 rounded-lg text-sm group relative">
-            <div className="font-bold text-green-700 flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1">
-                    <Key size={14}/> {t('Mã bản quyền / Key:', 'License Key:')}
-                </div>
-                <div className="flex gap-2">
-                    {/* Nút Ẩn/Hiện */}
-                    <button 
-                        onClick={() => setIsVisible(!isVisible)}
-                        className="text-green-600 hover:bg-green-100 p-1 rounded transition"
-                        title={isVisible ? "Che đi" : "Xem đầy đủ"}
-                    >
-                        {isVisible ? <EyeOff size={16}/> : <Eye size={16}/>}
-                    </button>
-                    {/* Nút Copy */}
-                    <button 
-                        onClick={() => copyToClipboard(text)}
-                        className="text-green-600 hover:bg-green-100 p-1 rounded transition"
-                        title="Copy Full"
-                    >
-                        <Copy size={16}/>
-                    </button>
-                </div>
-            </div>
-
-            {/* Nội dung Key */}
-            <div className="font-mono text-slate-700 whitespace-pre-line break-all">
-                {isVisible ? text : getMaskedText(text)}
-            </div>
-            
-            {!isVisible && (
-                <div className="text-[10px] text-green-600/70 italic mt-1 select-none">
-                    * {t('Đã che một phần để bảo mật.', 'Masked for security.')}
-                </div>
-            )}
-        </div>
-    );
-};
-
-// --- COMPONENT CHÍNH ---
-const AdminOrders = () => {
-  const { t, lang } = useLang();
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState(null); 
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
-
-  useEffect(() => {
-    fetchOrders();
-  }, [page, filterStatus]); 
-
-  const fetchOrders = async () => {
-    setLoading(true);
-    try {
-      let query = supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (
-            *,
-            products (
-              title,
-              title_en,
-              images,
-              price
-            )
-          )
-        `, { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE - 1);
-
-      if (filterStatus !== 'all') {
-        query = query.eq('status', filterStatus);
-      }
-
-      if (searchTerm) {
-        query = query.or(`customer_email.ilike.%${searchTerm}%,oxapay_track_id.ilike.%${searchTerm}%`);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      setOrders(data || []);
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-      toast.error(t('Không thể tải danh sách đơn hàng', 'Failed to fetch orders'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US');
-  };
-
-  const formatTime = (dateString) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleTimeString(lang === 'vi' ? 'vi-VN' : 'en-US');
-  };
-
-  const getStatusBadge = (status) => {
-    const styles = {
-      pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-      paid: 'bg-blue-100 text-blue-800 border-blue-200',
-      completed: 'bg-green-100 text-green-800 border-green-200',
-      expired: 'bg-gray-100 text-gray-800 border-gray-200',
-      failed: 'bg-red-100 text-red-800 border-red-200',
-    };
+export default function AdminOrders() {
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selectedOrder, setSelectedOrder] = useState(null);
     
-    const labels = {
-      pending: t('Chờ xử lý', 'Pending'),
-      paid: t('Đã thanh toán', 'Paid'),
-      completed: t('Hoàn thành', 'Completed'),
-      expired: t('Hết hạn', 'Expired'),
-      failed: t('Thất bại', 'Failed'),
+    // State cho việc update status
+    const [updatingStatus, setUpdatingStatus] = useState(false);
+    const [newStatus, setNewStatus] = useState('');
+
+    useEffect(() => {
+        fetchOrders();
+        
+        // Realtime subscription
+        const channel = supabase
+            .channel('admin-orders')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+                fetchOrders();
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
+    async function fetchOrders() {
+        // Load orders kèm items và product info
+        const { data, error } = await supabase
+            .from('orders')
+            .select('*, order_items(*, products(title))')
+            .order('created_at', { ascending: false });
+        
+        if (error) console.error("Error fetching orders:", error);
+        else setOrders(data || []);
+        setLoading(false);
+    }
+
+    const handleViewOrder = (order) => {
+        setSelectedOrder(order);
+        setNewStatus(order.status); // Set status hiện tại vào dropdown
     };
 
+    const handleDeleteOrder = async (id) => {
+        if (!confirm("Bạn có chắc muốn xóa đơn này?")) return;
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({ action: 'delete_order', orderId: id })
+            });
+            if (!res.ok) throw new Error("Failed to delete");
+            // Fetch lại trigger bởi realtime rồi nên ko cần gọi lại manual, nhưng gọi cho chắc
+            fetchOrders();
+            if (selectedOrder?.id === id) setSelectedOrder(null);
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    // Hàm gọi Action cập nhật trạng thái
+    const handleUpdateStatus = async () => {
+        if (!selectedOrder) return;
+        setUpdatingStatus(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({ 
+                    action: 'update_order_status', 
+                    orderId: selectedOrder.id,
+                    status: newStatus,
+                    customerEmail: selectedOrder.customer_email
+                })
+            });
+            
+            const result = await res.json();
+            if (!res.ok) throw new Error(result.error || "Update failed");
+
+            alert("Cập nhật trạng thái thành công!");
+            setSelectedOrder({ ...selectedOrder, status: newStatus }); // Update UI tạm
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setUpdatingStatus(false);
+        }
+    };
+
+    if (loading) return <div>Loading orders...</div>;
+
     return (
-      <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.expired}`}>
-        <span className="capitalize">{labels[status] || status}</span>
-      </span>
-    );
-  };
-
-  const filterLabels = {
-      all: t('Tất cả', 'All'),
-      pending: t('Chờ xử lý', 'Pending'),
-      paid: t('Đã thanh toán', 'Paid'),
-      completed: t('Hoàn thành', 'Completed'),
-      expired: t('Hết hạn', 'Expired'),
-  };
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-      <div className="p-6 border-b border-slate-100">
-        <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
-          <h2 className="text-xl font-bold text-slate-800">{t('Quản lý Đơn hàng', 'Order Management')}</h2>
-          <div className="flex gap-2">
-            <button onClick={fetchOrders} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
-              <Clock size={20} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
-              type="text" 
-              placeholder={t('Tìm theo email, Order ID...', 'Search by email, Order ID...')} 
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && fetchOrders()}
-            />
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-2 sm:pb-0">
-            {['all', 'pending', 'paid', 'completed'].map(status => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border
-                  ${filterStatus === status 
-                    ? 'bg-blue-600 text-white border-blue-600' 
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              >
-                {filterLabels[status]}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Mã đơn', 'Order ID')}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Khách hàng', 'Customer')}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Tổng tiền', 'Total Amount')}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Trạng thái', 'Status')}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase">{t('Ngày tạo', 'Created At')}</th>
-              <th className="px-6 py-4 text-right text-xs font-semibold text-slate-600 uppercase">{t('Hành động', 'Actions')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {loading ? (
-              [...Array(5)].map((_, i) => (
-                <tr key={i} className="animate-pulse">
-                  <td colSpan="6" className="px-6 py-4"><div className="h-10 bg-slate-100 rounded"></div></td>
-                </tr>
-              ))
-            ) : orders.length === 0 ? (
-              <tr><td colSpan="6" className="px-6 py-12 text-center text-slate-500">{t('Không tìm thấy đơn hàng nào.', 'No orders found.')}</td></tr>
-            ) : (
-              orders.map((order) => (
-                <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-4 font-medium text-slate-900">#{order.id}<div className="text-xs text-slate-400 mt-1">{order.oxapay_track_id || '-'}</div></td>
-                  <td className="px-6 py-4"><div className="text-sm font-medium text-slate-900">{order.customer_name || 'Guest'}</div><div className="text-xs text-slate-500">{order.customer_email}</div></td>
-                  <td className="px-6 py-4 font-bold text-green-600">{formatCurrency(order.amount)}</td>
-                  <td className="px-6 py-4">{getStatusBadge(order.status)}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{formatDate(order.created_at)}<div className="text-xs text-slate-400">{formatTime(order.created_at)}</div></td>
-                  <td className="px-6 py-4 text-right">
-                    <button onClick={() => setSelectedOrder(order)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Eye size={18} /></button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="p-4 border-t border-slate-100 flex justify-center gap-2">
-        <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50"><ChevronLeft size={20} /></button>
-        <span className="px-4 py-2 bg-slate-50 rounded-lg text-sm font-medium flex items-center">{t('Trang', 'Page')} {page}</span>
-        <button onClick={() => setPage(p => p + 1)} disabled={orders.length < ITEMS_PER_PAGE} className="p-2 border rounded-lg hover:bg-slate-50 disabled:opacity-50"><ChevronRight size={20} /></button>
-      </div>
-
-      {/* MODAL CHI TIẾT */}
-      {selectedOrder && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-fade-in-up">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800">{t('Chi tiết đơn hàng', 'Order Details')} #{selectedOrder.id}</h3>
-                <p className="text-sm text-slate-500 mt-1">{new Date(selectedOrder.created_at).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US')}</p>
-              </div>
-              <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><XCircle size={24} /></button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                  <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Filter size={16}/> {t('Thông tin khách hàng', 'Customer Info')}</h4>
-                  <div className="space-y-2 text-sm">
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Email:', 'Email:')}</span> {selectedOrder.customer_email}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name || 'N/A'}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
-                  </div>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                  <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Package size={16}/> {t('Thông tin thanh toán', 'Payment Info')}</h4>
-                  <div className="space-y-2 text-sm">
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Trạng thái:', 'Status:')}</span> {getStatusBadge(selectedOrder.status)}</p>
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Tổng tiền:', 'Total:')}</span> <span className="font-bold text-green-600 text-lg">{formatCurrency(selectedOrder.amount)}</span></p>
-                    <p><span className="text-slate-500 font-medium w-32 inline-block">{t('Track ID:', 'Track ID:')}</span> <span className="font-mono bg-slate-200 px-2 py-0.5 rounded text-xs">{selectedOrder.oxapay_track_id || '-'}</span></p>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="font-bold text-slate-800 mb-4 border-l-4 border-blue-600 pl-3">{t('Sản phẩm đã mua', 'Purchased Items')}</h4>
-                <div className="border rounded-xl overflow-hidden shadow-sm">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 border-b">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-semibold text-slate-600">{t('Sản phẩm', 'Product')}</th>
-                        <th className="px-4 py-3 text-center font-semibold text-slate-600">{t('SL', 'Qty')}</th>
-                        <th className="px-4 py-3 text-right font-semibold text-slate-600">{t('Giá', 'Price')}</th>
-                      </tr>
+        <div>
+            <h2 className="text-xl font-bold mb-4">Quản lý Đơn hàng</h2>
+            <div className="overflow-x-auto bg-white rounded shadow">
+                <table className="w-full text-left border-collapse">
+                    <thead>
+                        <tr className="bg-gray-100 border-b">
+                            <th className="p-3">ID</th>
+                            <th className="p-3">Khách hàng</th>
+                            <th className="p-3">Tổng tiền</th>
+                            <th className="p-3">Trạng thái</th>
+                            <th className="p-3">Ngày tạo</th>
+                            <th className="p-3">Hành động</th>
+                        </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {selectedOrder.order_items?.map((item, idx) => {
-                        const displayName = item.product_name || item.products?.title || 'Unknown Product';
-                        const variantInfo = item.variant_name; 
-
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50 align-top">
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-1">
-                                <div className="font-medium text-slate-900 text-base">{displayName}</div>
-                                {variantInfo && <div className="text-xs text-slate-500 bg-slate-100 w-fit px-2 py-0.5 rounded">{variantInfo}</div>}
-                                
-                                {/* --- SỬ DỤNG COMPONENT MASKED KEY --- */}
-                                {(selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && item.assigned_key && (
-                                    <MaskedKeyDisplay text={item.assigned_key} t={t} />
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
-                            <td className="px-4 py-3 text-right font-bold text-slate-800">{formatCurrency(item.price_at_purchase * item.quantity)}</td>
-                          </tr>
-                        );
-                      })}
+                    <tbody>
+                        {orders.map(order => (
+                            <tr key={order.id} className="border-b hover:bg-gray-50">
+                                <td className="p-3">#{order.id}</td>
+                                <td className="p-3">
+                                    <div className="font-medium">{order.customer_email}</div>
+                                    <div className="text-xs text-gray-500">{order.customer_name}</div>
+                                </td>
+                                <td className="p-3">${order.amount}</td>
+                                <td className="p-3">
+                                    <span className={`px-2 py-1 rounded text-xs font-bold 
+                                        ${order.status === 'paid' ? 'bg-green-100 text-green-800' : 
+                                          order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                                          order.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                                          'bg-gray-100 text-gray-800'}`}>
+                                        {order.status}
+                                    </span>
+                                </td>
+                                <td className="p-3 text-sm text-gray-500">
+                                    {new Date(order.created_at).toLocaleString()}
+                                </td>
+                                <td className="p-3 space-x-2">
+                                    <button 
+                                        onClick={() => handleViewOrder(order)}
+                                        className="text-blue-600 hover:underline">
+                                        Chi tiết
+                                    </button>
+                                    <button 
+                                        onClick={() => handleDeleteOrder(order.id)}
+                                        className="text-red-600 hover:underline">
+                                        Xóa
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
                     </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {selectedOrder.notes && (
-                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 text-sm text-yellow-800">
-                  <span className="font-bold block mb-1">{t('Ghi chú hệ thống:', 'System Notes:')}</span>
-                  {selectedOrder.notes}
-                </div>
-              )}
+                </table>
             </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
-export default AdminOrders;
+            {/* Modal Chi tiết đơn hàng */}
+            {selectedOrder && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold">Chi tiết đơn hàng #{selectedOrder.id}</h3>
+                            <button onClick={() => setSelectedOrder(null)} className="text-gray-500 hover:text-gray-700">✕</button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                            <div>
+                                <p><strong>Email:</strong> {selectedOrder.customer_email}</p>
+                                <p><strong>Tên khách:</strong> {selectedOrder.customer_name || '---'}</p>
+                                <p><strong>SĐT:</strong> {selectedOrder.phone_number || selectedOrder.contact_info || '---'}</p>
+                            </div>
+                            <div>
+                                <p><strong>Ngày tạo:</strong> {new Date(selectedOrder.created_at).toLocaleString()}</p>
+                                <p><strong>Mã vận đơn (TrackID):</strong> {selectedOrder.oxapay_track_id || '---'}</p>
+                                {/* [MỚI] HIỂN THỊ ĐỊA CHỈ */}
+                                <p className="mt-1">
+                                    <strong>Địa chỉ giao hàng:</strong><br/>
+                                    <span className="bg-yellow-50 block p-1 border rounded mt-1">
+                                        {selectedOrder.shipping_address || 'Không có địa chỉ (Sản phẩm Digital?)'}
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* [MỚI] KHU VỰC CẬP NHẬT TRẠNG THÁI */}
+                        <div className="mb-6 p-4 bg-gray-50 rounded border border-gray-200">
+                            <h4 className="font-bold mb-2 text-gray-700">Cập nhật trạng thái đơn hàng</h4>
+                            <div className="flex gap-2">
+                                <select 
+                                    value={newStatus} 
+                                    onChange={(e) => setNewStatus(e.target.value)}
+                                    className="border rounded p-2 flex-1"
+                                >
+                                    <option value="pending">Pending (Chờ thanh toán)</option>
+                                    <option value="paid">Paid (Đã thanh toán - Chờ xử lý)</option>
+                                    <option value="shipping">Shipping (Đang vận chuyển)</option>
+                                    <option value="completed">Completed (Hoàn thành)</option>
+                                    <option value="cancelled">Cancelled (Hủy)</option>
+                                </select>
+                                <button 
+                                    onClick={handleUpdateStatus}
+                                    disabled={updatingStatus}
+                                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {updatingStatus ? 'Đang lưu...' : 'Cập nhật'}
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                                * Lưu ý: Việc cập nhật trạng thái sẽ gửi thông báo đến người dùng.
+                            </p>
+                        </div>
+
+                        <div className="border-t pt-4">
+                            <h4 className="font-bold mb-2">Sản phẩm</h4>
+                            <ul className="space-y-2">
+                                {selectedOrder.order_items.map(item => (
+                                    <li key={item.id} className="flex justify-between border-b pb-2">
+                                        <div>
+                                            <div className="font-medium">
+                                                {item.product_name || item.products?.title}
+                                                {item.variant_name && <span className="text-gray-500"> ({item.variant_name})</span>}
+                                            </div>
+                                            <div className="text-sm text-gray-500">x {item.quantity}</div>
+                                            {item.assigned_key && (
+                                                <div className="text-xs text-green-600 mt-1 bg-green-50 p-1 rounded font-mono">
+                                                    Key: {item.assigned_key.substring(0, 50)}...
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="font-bold">
+                                            ${item.price_at_purchase}
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                        
+                        <div className="text-right mt-4 pt-4 border-t text-xl font-bold">
+                            Tổng cộng: ${selectedOrder.amount}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
