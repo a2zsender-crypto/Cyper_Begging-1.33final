@@ -33,25 +33,24 @@ export default function Success() {
     fetchOrder();
   }, [orderId]);
 
-  // 2. Lấy thông tin cấu hình Telegram
+// 2. Lấy thông tin cấu hình Telegram (Đã sửa theo logic của Contact)
   useEffect(() => {
     const initData = async () => {
-      const { data: settingData } = await supabase.from('site_settings').select('value').eq('key', 'contact_telegram').single();
-      if (settingData?.value) {
-        setTelegramUsername(settingData.value.replace('@', ''));
+      // Thay đổi: Query giống hệt bên Contact để đảm bảo quyền truy cập và dữ liệu đúng
+      const { data } = await supabase
+        .from('site_settings')
+        .select('*')
+        .eq('is_public', true);
+
+      // Lọc lấy key contact_telegram từ danh sách trả về
+      const teleSetting = data?.find(item => item.key === 'contact_telegram');
+      
+      if (teleSetting?.value) {
+        setTelegramUsername(teleSetting.value.replace('@', ''));
       }
     };
     initData();
   }, []);
-
-  if (!orderId) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400 gap-4">
-              <p>No Order ID found.</p>
-              <Link to="/" className="text-blue-600 hover:underline font-bold">Go Home</Link>
-          </div>
-      );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -138,3 +137,4 @@ export default function Success() {
     </div>
   );
 }
+
