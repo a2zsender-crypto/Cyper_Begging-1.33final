@@ -1,322 +1,228 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../../supabaseClient';
+import { supabase } from '../supabaseClient';
+import { useCart } from '../context/CartContext';
+import { useLang } from '../context/LangContext';
+import { ShoppingCart, CreditCard, CheckCircle, Tag, AlertTriangle, Zap, Box } from 'lucide-react'; 
 import { toast } from 'react-toastify';
-import { Save, ArrowLeft, Plus, Trash2, Upload, Zap, AlertCircle, Layers } from 'lucide-react';
-import { useLang } from '../../context/LangContext';
 
 export default function ProductDetail() {
-  const { t } = useLang();
   const { id } = useParams();
+  const { addToCart, cart } = useCart();
+  const { lang, t } = useLang();
   const navigate = useNavigate();
-  const isEdit = id !== 'new';
   
-  const [loading, setLoading] = useState(false);
-  const [product, setProduct] = useState({
-    title: '',
-    description: '',
-    price: 0,
-    category: 'Voucher',
-    is_digital: true,
-    allow_api_restock: false,
-    images: []
-  });
-
-  // Quản lý biến thể từ bảng product_variants
-  const [variants, setVariants] = useState([]);
-  const [deletedVariantIds, setDeletedVariantIds] = useState([]); // Theo dõi các ID cần xóa
+  const [product, setProduct] = useState(null);
+  const [variants, setVariants] = useState([]); // Dữ liệu từ bảng product_variants
+  const [mainImg, setMainImg] = useState('');
+  
+  // Thay vì lưu option text, ta lưu ID của biến thể được chọn
+  const [selectedVariantId, setSelectedVariantId] = useState(null); 
+  
+  const [finalPrice, setFinalPrice] = useState(0);
+  const [currentStock, setCurrentStock] = useState(0); 
+  const [loadingStock, setLoadingStock] = useState(true);
 
   useEffect(() => {
-    if (isEdit) fetchProductData();
+    fetchData();
   }, [id]);
 
-  const fetchProductData = async () => {
-    try {
-        // 1. Lấy thông tin sản phẩm
-        const { data: prodData, error: prodError } = await supabase
-            .from('products')
-            .select('*')
-            .eq('id', id)
-            .single();
-        
-        if (prodError) throw prodError;
-        setProduct({
-            ...prodData,
-            allow_api_restock: prodData.allow_api_restock === true
-        });
+  const fetchData = async () => {
+      // 1. Lấy thông tin SP
+      const { data: prod } = await supabase.from('products').select('*').eq('id', id).single();
+      if (!prod) return;
 
-        // 2. Lấy danh sách biến thể từ bảng product_variants
-        const { data: varData, error: varError } = await supabase
-            .from('product_variants')
-            .select('*')
-            .eq('product_id', id)
-            .order('id', { ascending: true });
+      // 2. Lấy danh sách biến thể (Variant Table)
+      const { data: vars } = await supabase
+          .from('product_variants')
+          .select('*')
+          .eq('product_id', id)
+          .order('price_mod', { ascending: true }); // Sắp xếp theo giá tăng dần
 
-        if (varError) throw varError;
-        setVariants(varData || []);
+      setProduct(prod);
+      setVariants(vars || []);
+      if (prod.images?.length) setMainImg(prod.images[0]);
+      setFinalPrice(prod.price);
 
-    } catch (err) {
-        toast.error("Lỗi tải dữ liệu: " + err.message);
-    }
+      // Auto select biến thể đầu tiên
+      if (vars && vars.length > 0) {
+          setSelectedVariantId(vars[0].id);
+      } else {
+          // Không có biến thể -> Check stock chung
+          checkStock(prod, null);
+      }
   };
 
-  const handleImageUpload = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const fileName = `prod_${Date.now()}`;
-      const { error } = await supabase.storage.from('product-images').upload(fileName, file);
-      if(error) return toast.error(error.message);
-      const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-      setProduct({ ...product, images: [...(product.images||[]), data.publicUrl] });
+  // --- HÀM CHECK STOCK REALTIME ---
+  const checkStock = async (prod, variantId) => {
+      setLoadingStock(true);
+      try {
+          if (prod.is_digital) {
+              // Gọi hàm mới: gửi variant_id cụ thể
+              const { data: count, error } = await supabase.rpc('get_digital_stock', {
+                  p_product_id: prod.id,
+                  p_variant_id: variantId
+              });
+              
+              if (error) throw error;
+              setCurrentStock(count || 0);
+
+          } else {
+              // Logic hàng vật lý (giữ nguyên hoặc nâng cấp sau)
+              setCurrentStock(prod.physical_stock || 0);
+          }
+      } catch (err) {
+          console.error("Stock err:", err);
+          setCurrentStock(0);
+      } finally {
+          setLoadingStock(false);
+      }
   };
 
-  // --- LOGIC UI BIẾN THỂ ---
-  const addVariant = () => {
-      // Thêm một dòng tạm thời (chưa có ID DB)
-      setVariants([...variants, { 
-          name: '', 
-          sku: '', 
-          price_mod: 0,
-          is_new: true // Đánh dấu là mới để insert
-      }]);
-  };
-
-  const removeVariant = (index) => {
-      const item = variants[index];
-      // Nếu là item đã có trong DB (có id), đưa vào danh sách chờ xóa
-      if (!item.is_new && item.id) {
-          setDeletedVariantIds([...deletedVariantIds, item.id]);
+  // Khi thay đổi biến thể -> Tính lại giá & Check stock
+  useEffect(() => {
+      if (!product) return;
+      
+      let extra = 0;
+      if (selectedVariantId && variants.length > 0) {
+          const v = variants.find(x => x.id === selectedVariantId);
+          if (v) extra = v.price_mod || 0;
+          checkStock(product, selectedVariantId);
+      } else {
+          // Check stock sp gốc (không biến thể)
+          if (product && variants.length === 0) checkStock(product, null);
       }
       
-      const newVars = [...variants];
-      newVars.splice(index, 1);
-      setVariants(newVars);
+      setFinalPrice(product.price + extra);
+
+  }, [selectedVariantId, product, variants]);
+
+  const getProductToAdd = () => {
+      const selectedVar = variants.find(v => v.id === selectedVariantId);
+      return { 
+          ...product, 
+          price: finalPrice, 
+          // Gửi thông tin chuẩn xuống giỏ hàng
+          variant_id: selectedVariantId,
+          variant_name: selectedVar ? selectedVar.name : null,
+          variant_sku: selectedVar ? selectedVar.sku : null, // VINA50
+          maxStock: currentStock 
+      };
   };
 
-  const updateVariant = (index, field, value) => {
-      const newVars = [...variants];
-      newVars[index][field] = value;
+  const isOutOfStock = !loadingStock && currentStock <= 0 && !product?.allow_api_restock;
+
+  const handleAddToCart = () => {
+      if (loadingStock) return;
+      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
       
-      // Auto-fill SKU thông minh: "VINA" + Tên biến thể (nếu SKU đang trống)
-      if (field === 'name' && !newVars[index].sku && product.allow_api_restock) {
-           const cleanName = value.toString().replace(/\D/g, ''); // Lấy số: 50,000 -> 50000
-           // Logic demo: Nếu là Vina -> VINA50000. Cái này người dùng tự sửa lại được.
-           newVars[index].sku = cleanName; 
+      const itemToAdd = getProductToAdd();
+      
+      // Check số lượng trong giỏ
+      const currentCartItem = cart.find(i => 
+          i.id === product.id && i.variant_id === selectedVariantId
+      );
+      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+      
+      if (!product.allow_api_restock && (currentQty + 1 > currentStock)) {
+          return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left in stock.`));
       }
-      setVariants(newVars);
-  };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-        // 1. Lưu Sản phẩm
-        const prodPayload = { 
-            title: product.title,
-            description: product.description,
-            price: product.price,
-            category: product.category,
-            is_digital: product.is_digital,
-            images: product.images,
-            allow_api_restock: product.allow_api_restock
-        };
+      addToCart(itemToAdd); 
+      toast.success(t("Đã thêm vào giỏ hàng!", "Added to cart!")); 
+  }
 
-        let productId = id;
+  const handleBuyNow = () => {
+      if (loadingStock) return;
+      if (isOutOfStock) return toast.error(t("Sản phẩm tạm hết hàng!", "Out of stock!"));
+      
+      const itemToAdd = getProductToAdd();
+      const currentCartItem = cart.find(i => 
+          i.id === product.id && i.variant_id === selectedVariantId
+      );
+      const currentQty = currentCartItem ? currentCartItem.quantity : 0;
 
-        if (isEdit) {
-            await supabase.from('products').update(prodPayload).eq('id', id);
-        } else {
-            const { data: newProd, error } = await supabase.from('products').insert(prodPayload).select().single();
-            if (error) throw error;
-            productId = newProd.id;
-        }
+      if (!product.allow_api_restock && (currentQty + 1 > currentStock)) {
+          return toast.warn(t("Không đủ hàng trong kho!", "Not enough stock!"));
+      }
 
-        // 2. Xử lý Biến thể (Cập nhật bảng product_variants)
-        
-        // A. Xóa các biến thể bị user remove
-        if (deletedVariantIds.length > 0) {
-            await supabase.from('product_variants').delete().in('id', deletedVariantIds);
-        }
+      addToCart(itemToAdd); 
+      navigate('/cart'); 
+  }
 
-        // B. Upsert (Thêm mới hoặc Cập nhật)
-        const variantsToUpsert = variants.map(v => ({
-            id: v.is_new ? undefined : v.id, // Nếu mới thì ko gửi ID để DB tự sinh
-            product_id: productId,
-            name: v.name,
-            sku: v.sku ? v.sku.toUpperCase() : null, // SKU luôn viết hoa
-            price_mod: v.price_mod
-        }));
+  if (!product) return <div className="flex justify-center items-center h-64 text-slate-400">Loading...</div>;
 
-        if (variantsToUpsert.length > 0) {
-            const { error: varErr } = await supabase.from('product_variants').upsert(variantsToUpsert);
-            if (varErr) throw varErr;
-        }
-
-        toast.success(t("Đã lưu thành công!", "Saved successfully!"));
-        navigate('/admin/products');
-
-    } catch (error) {
-        toast.error("Lỗi lưu: " + error.message);
-    } finally {
-        setLoading(false);
-    }
-  };
+  const displayTitle = lang === 'vi' ? product.title : (product.title_en || product.title);
+  const displayDesc = lang === 'vi' ? product.description : (product.description_en || product.description);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-20 animate-fade-in">
-        <div className="flex items-center gap-4 mb-6">
-            <button onClick={() => navigate('/admin/products')} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
-                <ArrowLeft size={20}/>
-            </button>
-            <h1 className="text-2xl font-bold text-slate-800">
-                {isEdit ? t(`Sửa sản phẩm #${id}`, `Edit Product #${id}`) : t('Thêm sản phẩm mới', 'New Product')}
-            </h1>
+    <div className="container mx-auto px-4 py-8 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 md:flex gap-10">
+        {/* ẢNH SẢN PHẨM */}
+        <div className="md:w-1/2 flex flex-col gap-4">
+          <div className="h-80 md:h-96 bg-gray-50 rounded-2xl overflow-hidden border border-slate-100 flex items-center justify-center p-4">
+            <img src={mainImg} alt={displayTitle} className="w-full h-full object-contain hover:scale-105 transition duration-500" />
+          </div>
+          {product.images?.length > 1 && (
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {product.images.map((img, idx) => (
+                <img key={idx} src={img} onClick={() => setMainImg(img)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === img ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} />
+              ))}
+            </div>
+          )}
         </div>
 
-        <form onSubmit={handleSave} className="grid grid-cols-3 gap-8">
-            <div className="col-span-2 space-y-6">
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                    <h3 className="font-bold text-slate-700 border-b pb-2">{t('Thông tin chung', 'General Info')}</h3>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 mb-1">{t('Tên sản phẩm', 'Product Name')}</label>
-                        <input required className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={product.title} onChange={e=>setProduct({...product, title: e.target.value})}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 mb-1">{t('Mô tả chi tiết', 'Description')}</label>
-                        <textarea className="w-full border p-2 rounded-lg h-32 focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={product.description} onChange={e=>setProduct({...product, description: e.target.value})}
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1">{t('Danh mục', 'Category')}</label>
-                            <select className="w-full border p-2 rounded-lg"
-                                value={product.category} onChange={e=>setProduct({...product, category: e.target.value})}>
-                                <option>Voucher</option>
-                                <option>Game Key</option>
-                                <option>Top-up</option>
-                                <option>Software</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1">{t('Loại hàng', 'Product Type')}</label>
-                            <select className="w-full border p-2 rounded-lg"
-                                value={product.is_digital} onChange={e=>setProduct({...product, is_digital: e.target.value === 'true'})}>
-                                <option value="true">{t('Digital (Key/Code)', 'Digital (Key/Code)')}</option>
-                                <option value="false">{t('Vật lý (Giao hàng)', 'Physical (Shipping)')}</option>
-                            </select>
-                        </div>
-                    </div>
+        {/* THÔNG TIN */}
+        <div className="md:w-1/2 mt-8 md:mt-0 flex flex-col">
+          <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4 leading-tight">{displayTitle}</h1>
+          <div className="flex items-center gap-4 mb-6">
+             <div className="text-3xl font-extrabold text-green-600">{finalPrice.toLocaleString()} USDT</div>
+             {product.is_digital ? <span className="flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded-full uppercase"><Zap size={12}/> Digital Key</span> : <span className="flex items-center gap-1 px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full uppercase"><Box size={12}/> Physical</span>}
+          </div>
 
-                    {/* API CHECKBOX */}
-                    {product.is_digital && (
-                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3 mt-2">
-                             <input type="checkbox" className="mt-1 w-5 h-5 text-indigo-600 rounded cursor-pointer"
-                                checked={product.allow_api_restock}
-                                onChange={e => setProduct({...product, allow_api_restock: e.target.checked})}
-                            />
-                            <div>
-                                <label className="block text-sm font-bold text-indigo-900 flex items-center gap-2">
-                                    <Zap size={16}/> {t("Get Key over API if Out of Stock", "Get Key over API")}
-                                </label>
-                                <p className="text-xs text-indigo-700 mt-1">
-                                    {t("Bật: Cấu hình Mã SKU bên dưới để gọi API khi hết kho.", "Enable: Configure SKU below for API calls.")}
-                                </p>
-                            </div>
-                        </div>
-                    )}
-                    
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 mb-1">{t('Giá mặc định', 'Default Price')}</label>
-                        <input type="number" className="w-full border p-2 rounded-lg font-mono"
-                            value={product.price} onChange={e=>setProduct({...product, price: Number(e.target.value)})}
-                        />
-                    </div>
-                </div>
+          <div className={`mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${!isOutOfStock ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+              {loadingStock ? (
+                  <span className="animate-pulse">Checking stock...</span>
+              ) : !isOutOfStock ? (
+                  <><CheckCircle size={16}/> {product.allow_api_restock && currentStock <=0 ? t('Sẵn hàng (API)', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
+              ) : (
+                  <><AlertTriangle size={16}/> {t('Hết hàng', 'Out of Stock')}</>
+              )}
+          </div>
 
-                {/* QUẢN LÝ BIẾN THỂ (BẢNG MỚI) */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                    <div className="flex justify-between items-center border-b pb-2">
-                        <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                            <Layers size={18}/> {t('Danh sách Biến thể (Variants)', 'Variants')}
-                        </h3>
-                        <button type="button" onClick={addVariant} className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg flex items-center gap-1 font-medium hover:bg-blue-100">
-                            <Plus size={16}/> {t('Thêm biến thể', 'Add Variant')}
-                        </button>
-                    </div>
+          {/* DANH SÁCH BIẾN THỂ TỪ DB MỚI */}
+          {variants.length > 0 && (
+              <div className="mb-6 space-y-4 p-5 bg-slate-50 rounded-xl border border-slate-100">
+                  <p className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1"><Tag size={14}/> {t('Phân loại', 'Variants')}</p>
+                  <div className="flex flex-wrap gap-2">
+                      {variants.map((v) => {
+                          const isSelected = selectedVariantId === v.id; 
+                          return (
+                              <button key={v.id} onClick={() => setSelectedVariantId(v.id)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
+                                  {v.name} {v.price_mod > 0 && <span className="text-xs opacity-75 ml-1">(+${v.price_mod})</span>}
+                              </button>
+                          )
+                      })}
+                  </div>
+              </div>
+          )}
+          
+          <div className="prose max-w-none text-slate-600 mb-8 whitespace-pre-wrap border-t border-slate-100 pt-6 text-base leading-relaxed">
+            {displayDesc || (lang === 'en' ? "No description available." : "Chưa có mô tả chi tiết.")}
+          </div>
 
-                    {variants.length === 0 ? (
-                        <p className="text-sm text-slate-400 italic text-center py-4">{t('Chưa có biến thể (Bán theo giá gốc).', 'No variants.')}</p>
-                    ) : (
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-12 gap-2 text-xs font-bold text-slate-500 uppercase bg-slate-50 p-2 rounded">
-                                <div className="col-span-4">{t('Tên (VD: 50k)', 'Variant Name')}</div>
-                                <div className="col-span-4 flex items-center gap-1">SKU / API Code {product.allow_api_restock && <Zap size={10} className="text-indigo-600"/>}</div>
-                                <div className="col-span-3">{t('Giá (+/-)', 'Price')}</div>
-                                <div className="col-span-1"></div>
-                            </div>
-                            {variants.map((v, idx) => (
-                                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                                    <div className="col-span-4">
-                                        <input className="w-full border p-2 rounded outline-none focus:border-blue-500"
-                                            placeholder="VD: 50,000" value={v.name}
-                                            onChange={e => updateVariant(idx, 'name', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-span-4">
-                                        <input 
-                                            // Chỉ cho sửa SKU khi bật API mode (hoặc tùy ý bạn, ở đây tôi mở luôn cho tiện)
-                                            className={`w-full border p-2 rounded font-mono text-sm outline-none ${product.allow_api_restock ? 'bg-white border-indigo-300 text-indigo-700 font-bold' : 'bg-slate-100 text-slate-400'}`}
-                                            placeholder={product.allow_api_restock ? "VD: VINA50" : "Auto ID"} 
-                                            value={v.sku || ''}
-                                            onChange={e => updateVariant(idx, 'sku', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-span-3">
-                                        <input type="number" className="w-full border p-2 rounded text-right outline-none"
-                                            placeholder="0" value={v.price_mod}
-                                            onChange={e => updateVariant(idx, 'price_mod', Number(e.target.value))}
-                                        />
-                                    </div>
-                                    <div className="col-span-1 text-center">
-                                        <button type="button" onClick={() => removeVariant(idx)} className="text-red-400 hover:text-red-600">
-                                            <Trash2 size={18}/>
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 flex gap-2 items-start text-xs text-yellow-700 mt-2">
-                        <AlertCircle size={14} className="mt-0.5 shrink-0"/>
-                        <p>{t('Mỗi biến thể sẽ có một ID riêng. Dùng SKU để map với hệ thống API (Appota, v.v).', 'Each variant has unique ID. Use SKU for API mapping.')}</p>
-                    </div>
-                </div>
+          <div className="mt-auto space-y-4">
+            <div className="flex gap-4">
+              <button onClick={handleAddToCart} disabled={isOutOfStock || loadingStock} className="flex-1 bg-white border-2 border-blue-600 text-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                <ShoppingCart size={20}/> {t('THÊM GIỎ HÀNG', 'ADD TO CART')}
+              </button>
+              <button onClick={handleBuyNow} disabled={isOutOfStock || loadingStock} className="flex-1 bg-red-600 text-white py-3.5 rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-200 transition flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed">
+                <CreditCard size={20}/> {t('MUA NGAY', 'BUY NOW')}
+              </button>
             </div>
-
-            <div className="space-y-6">
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">{t('Hình ảnh', 'Images')}</h3>
-                    <div className="grid grid-cols-2 gap-2 mb-4">
-                        {product.images?.map((img, i) => (
-                            <img key={i} src={img} className="w-full h-24 object-cover rounded border" alt="prod" />
-                        ))}
-                    </div>
-                    <label className="block w-full border-2 border-dashed border-slate-300 rounded-xl p-4 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition text-slate-500">
-                        <Upload className="mx-auto mb-2" size={24}/>
-                        <span className="text-sm">{t('Tải ảnh lên', 'Upload Image')}</span>
-                        <input type="file" className="hidden" onChange={handleImageUpload}/>
-                    </label>
-                </div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                   <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-50 flex justify-center items-center gap-2">
-                       {loading ? <span>Saving...</span> : <><Save size={18}/><span>{isEdit ? t('Cập nhật', 'Update') : t('Tạo mới', 'Create')}</span></>}
-                   </button>
-                </div>
-            </div>
-        </form>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
