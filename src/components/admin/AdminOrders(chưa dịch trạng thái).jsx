@@ -66,18 +66,6 @@ const AdminOrders = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
-  // TỪ ĐIỂN TRẠNG THÁI
-  const statusLabels = {
-      all: t('Tất cả', 'All'),
-      pending: t('Chờ xử lý', 'Pending'),
-      paid: t('Đã thanh toán', 'Paid'),
-      shipping: t('Đang vận chuyển', 'Shipping'),
-      completed: t('Hoàn thành', 'Completed'),
-      cancelled: t('Đã hủy', 'Cancelled'),
-      expired: t('Hết hạn', 'Expired'),
-      failed: t('Thất bại', 'Failed')
-  };
-
   useEffect(() => {
     checkUserRole();
     fetchOrders();
@@ -114,93 +102,31 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FULL OPTION) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
-      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
+      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành ${newStatus}?`, `Confirm update status to ${newStatus}?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE TRỰC TIẾP VÀO DB ORDERS
-          const { error } = await supabase
-              .from('orders')
-              .update({ status: newStatus })
-              .eq('id', selectedOrder.id);
-
+          const { data, error } = await supabase.functions.invoke('admin-actions', {
+              body: { 
+                  action: 'update_order_status', 
+                  orderId: selectedOrder.id, 
+                  status: newStatus,
+                  customerEmail: selectedOrder.customer_email
+              }
+          });
           if (error) throw error;
+          if (data?.error) throw new Error(data.error);
 
-          // 2. TẠO THÔNG BÁO CHO USER (Chỉ nếu user_id tồn tại)
-          // Đã fix lỗi nhờ Policy SQL "Admins can insert notifications"
-          if (selectedOrder.user_id) {
-              const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
-              const statusText = statusLabels[newStatus] || newStatus;
-              const notifMsg = lang === 'vi' 
-                  ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
-                  : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
-
-              const { error: notifError } = await supabase.from('notifications').insert({
-                  user_id: selectedOrder.user_id,
-                  title: notifTitle,
-                  message: notifMsg,
-                  type: 'order',
-                  link: `/cart`,
-                  is_read: false
-              });
-              if (notifError) console.error("Notification Error:", notifError);
-          }
-
-          // 3. GỬI TELEGRAM (Client-side)
-          sendDirectTelegram(selectedOrder.id, newStatus);
-
-          // 4. GỬI EMAIL (FIXED: Thêm Auth Token)
-          sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
-
-          // 5. Cập nhật giao diện
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
-          setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: newStatus } : o));
+          fetchOrders();
           setSelectedOrder(prev => ({...prev, status: newStatus}));
-
       } catch (err) {
-          console.error("Update Error:", err);
-          toast.error(t('Lỗi cập nhật: ', 'Update failed: ') + (err.message || ''));
+          toast.error(err.message || "Update failed");
       } finally {
           setUpdatingStatus(false);
       }
-  };
-
-  const sendDirectTelegram = async (orderId, status) => {
-      try {
-          const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
-          const botToken = configs?.find(c => c.key === 'TELEGRAM_BOT_TOKEN')?.value;
-          const chatId = configs?.find(c => c.key === 'TELEGRAM_CHAT_ID')?.value;
-
-          if (!botToken || !chatId) return;
-
-          const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
-          const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
-          
-          await fetch(url, { mode: 'no-cors' });
-      } catch (e) { console.warn("Tele warning:", e); }
-  };
-
-  // Hàm gửi Email qua Function (Đã fix Auth Header)
-  const sendEmailNotification = async (email, orderId, status) => {
-      try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const token = session?.access_token;
-          if (!token) return;
-
-          const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
-          
-          fetch(FUNCTION_URL, {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ email, orderId, status, lang })
-          }).catch(e => console.warn("Email func error:", e));
-      } catch (e) { console.warn("Email warning:", e); }
   };
 
   const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -214,12 +140,11 @@ const AdminOrders = () => {
       completed: 'bg-green-100 text-green-800 border-green-200',
       expired: 'bg-gray-100 text-gray-800 border-gray-200',
       failed: 'bg-red-100 text-red-800 border-red-200',
-      shipping: 'bg-purple-100 text-purple-800 border-purple-200',
-      cancelled: 'bg-red-100 text-red-800 border-red-200'
+      shipping: 'bg-purple-100 text-purple-800 border-purple-200'
     };
     return (
       <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.expired}`}>
-        <span className="capitalize">{statusLabels[status] || status}</span>
+        <span className="capitalize">{status}</span>
       </span>
     );
   };
@@ -256,7 +181,7 @@ const AdminOrders = () => {
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border
                   ${filterStatus === status ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               >
-                {statusLabels[status] || status}
+                {status === 'all' ? t('Tất cả', 'All') : status}
               </button>
             ))}
           </div>
@@ -317,7 +242,7 @@ const AdminOrders = () => {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8">
-              {/* CẬP NHẬT TRẠNG THÁI */}
+              {/* CẬP NHẬT TRẠNG THÁI (Chỉ hiện với ADMIN) */}
               {userRole === 'admin' && (
                   <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div className="flex items-center gap-2">
@@ -333,11 +258,11 @@ const AdminOrders = () => {
                               onChange={(e) => setNewStatus(e.target.value)}
                               className="border border-indigo-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           >
-                              <option value="pending">{statusLabels['pending']}</option>
-                              <option value="paid">{statusLabels['paid']}</option>
-                              <option value="shipping">{statusLabels['shipping']}</option>
-                              <option value="completed">{statusLabels['completed']}</option>
-                              <option value="cancelled">{statusLabels['cancelled']}</option>
+                              <option value="pending">Pending</option>
+                              <option value="paid">Paid</option>
+                              <option value="shipping">Shipping</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
                           </select>
                           <button 
                               onClick={handleUpdateStatus} 
@@ -359,9 +284,12 @@ const AdminOrders = () => {
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name || 'N/A'}</p>
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
                     
-                    {/* HIỂN THỊ ĐỊA CHỈ SHIP */}
+                    {/* --- FIX: HIỂN THỊ ĐỊA CHỈ SHIP (Nếu có sản phẩm vật lý) --- */}
                     {(() => {
+                        // Check xem đơn hàng có sp vật lý không
                         const hasPhysical = selectedOrder.order_items?.some(i => i.products?.is_digital === false);
+                        
+                        // Chỉ hiển thị nếu có hàng vật lý VÀ có thông tin địa chỉ
                         if (hasPhysical && selectedOrder.shipping_address) {
                             return (
                                 <div className="mt-3 pt-3 border-t border-blue-200 text-sm">

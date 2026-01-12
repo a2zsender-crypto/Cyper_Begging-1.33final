@@ -114,7 +114,7 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FULL OPTION) ---
+  // --- HÀM UPDATE STATUS (FIX: CẬP NHẬT TRỰC TIẾP DB + TELEGRAM CLIENT-SIDE) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
@@ -129,34 +129,29 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHO USER (Chỉ nếu user_id tồn tại)
-          // Đã fix lỗi nhờ Policy SQL "Admins can insert notifications"
+          // 2. TẠO THÔNG BÁO CHO USER (Bell Notification)
+          // Kiểm tra nếu đơn hàng có user_id (không phải khách vãng lai) thì mới tạo thông báo
           if (selectedOrder.user_id) {
-              const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
-              const statusText = statusLabels[newStatus] || newStatus;
+              const notifTitle = lang === 'vi' ? 'Cập nhật đơn hàng' : 'Order Update';
               const notifMsg = lang === 'vi' 
-                  ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
-                  : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
+                  ? `Đơn hàng #${selectedOrder.id} đã chuyển sang trạng thái: ${statusLabels[newStatus]}`
+                  : `Order #${selectedOrder.id} status updated to: ${statusLabels[newStatus] || newStatus}`;
 
-              const { error: notifError } = await supabase.from('notifications').insert({
+              await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
-                  link: `/cart`,
                   is_read: false
               });
-              if (notifError) console.error("Notification Error:", notifError);
           }
 
-          // 3. GỬI TELEGRAM (Client-side)
+          // 3. GỬI TELEGRAM (Client-side Direct Call)
+          // Gọi hàm chạy ngầm, không await để tránh chặn UI
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (FIXED: Thêm Auth Token)
-          sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
-
-          // 5. Cập nhật giao diện
-          toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
+          // 4. Cập nhật giao diện
+          toast.success(t('Cập nhật & Gửi thông báo thành công!', 'Updated & Notified successfully!'));
           setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: newStatus } : o));
           setSelectedOrder(prev => ({...prev, status: newStatus}));
 
@@ -168,9 +163,12 @@ const AdminOrders = () => {
       }
   };
 
+  // Hàm gửi Telegram trực tiếp từ Browser (Bypass CORS bằng mode 'no-cors')
   const sendDirectTelegram = async (orderId, status) => {
       try {
+          // Lấy cấu hình Bot từ DB
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
+          
           const botToken = configs?.find(c => c.key === 'TELEGRAM_BOT_TOKEN')?.value;
           const chatId = configs?.find(c => c.key === 'TELEGRAM_CHAT_ID')?.value;
 
@@ -178,29 +176,14 @@ const AdminOrders = () => {
 
           const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
-          
+
+          // Dùng mode 'no-cors' để browser cho phép gửi request đi (dù không đọc được response trả về)
           await fetch(url, { mode: 'no-cors' });
-      } catch (e) { console.warn("Tele warning:", e); }
-  };
+          console.log("Tele sent (no-cors mode)");
 
-  // Hàm gửi Email qua Function (Đã fix Auth Header)
-  const sendEmailNotification = async (email, orderId, status) => {
-      try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const token = session?.access_token;
-          if (!token) return;
-
-          const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
-          
-          fetch(FUNCTION_URL, {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ email, orderId, status, lang })
-          }).catch(e => console.warn("Email func error:", e));
-      } catch (e) { console.warn("Email warning:", e); }
+      } catch (e) {
+          console.warn("Tele direct error:", e);
+      }
   };
 
   const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);

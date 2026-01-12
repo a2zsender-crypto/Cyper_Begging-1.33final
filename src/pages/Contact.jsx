@@ -1,306 +1,261 @@
-import { useState, useEffect, useRef } from 'react';
-import { useLang } from '../context/LangContext';
+import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { Mail, Phone, MapPin, Send, Loader2, MessageSquare, AlertCircle, User } from 'lucide-react';
-import { toast } from 'react-toastify';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useLang } from '../context/LangContext';
+import { Send, RefreshCw, MapPin, Phone, Mail, Calculator, Lock, MessageSquare } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import AdminContacts from '../components/admin/AdminContacts';
 
 export default function Contact() {
-  const { t, lang } = useLang();
+  const { t } = useLang(); 
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', message: '', captchaInput: '' });
+  const [settings, setSettings] = useState({}); 
+  const [mathProblem, setMathProblem] = useState({ a: 0, b: 0, result: 0 });
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', message: '' });
-  const [settings, setSettings] = useState({});
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-
-  // Chat Ticket State
-  const [ticketId, setTicketId] = useState(null);
-  const [ticketMessages, setTicketMessages] = useState([]);
-  const [replyMessage, setReplyMessage] = useState('');
-  const [ticketDetails, setTicketDetails] = useState(null);
-  const chatEndRef = useRef(null);
+  
+  // State mới để quản lý View (Lịch sử vs Form)
+  const [session, setSession] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-      // 1. Load Settings
+      // 1. Lấy Settings
       supabase.from('site_settings').select('*').eq('is_public', true)
         .then(({ data }) => {
             const conf = {}; data?.forEach(i => conf[i.key] = i.value);
             setSettings(conf);
         });
+      
+      // 2. Tạo Math Captcha
+      generateMathCaptcha();
 
-      // 2. Check Ticket ID from URL
-      const tid = searchParams.get('ticketId');
-      if (tid) {
-          setTicketId(tid);
-          fetchTicketData(tid);
-          
-          // Realtime Subscription for Chat
-          const channel = supabase.channel(`ticket-${tid}`)
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contact_replies', filter: `contact_id=eq.${tid}` }, 
-          (payload) => {
-              setTicketMessages(prev => [...prev, payload.new]);
-              scrollToBottom();
-          })
-          .subscribe();
+      // 3. Check Login & Auto-fill
+      const checkUser = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              setSession({ user });
+              setFormData(prev => ({
+                  ...prev,
+                  email: user.email, // Tự điền email
+                  name: user.user_metadata?.full_name || prev.name
+              }));
+          }
+      };
+      checkUser();
+  }, []);
 
-          return () => supabase.removeChannel(channel);
+  // 4. Tự động chuyển tab nếu có ticketId trên URL
+  useEffect(() => {
+      const ticketId = searchParams.get('ticketId');
+      if (ticketId && session) {
+          setShowHistory(true);
       }
-  }, [searchParams]);
+  }, [searchParams, session]);
 
-  const fetchTicketData = async (tid) => {
-      const { data: ticket } = await supabase.from('contacts').select('*').eq('id', tid).single();
-      if (ticket) setTicketDetails(ticket);
-
-      const { data: msgs } = await supabase.from('contact_replies').select('*').eq('contact_id', tid).order('created_at', {ascending: true});
-      if (msgs) {
-          setTicketMessages(msgs);
-          scrollToBottom();
-      }
-  };
-
-  const scrollToBottom = () => {
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+  const generateMathCaptcha = () => {
+    const a = Math.floor(Math.random() * 10) + 1; 
+    const b = Math.floor(Math.random() * 10) + 1;
+    setMathProblem({ a, b, result: a + b });
+    setFormData(prev => ({ ...prev, captchaInput: '' }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (parseInt(formData.captchaInput) !== mathProblem.result) {
+        return alert(t("Kết quả phép tính sai!", "Incorrect answer!"));
+    }
+
     setLoading(true);
-
     try {
-        // [ĐÃ SỬA] Lấy User ID hiện tại để gán stick cho user
-        const { data: { session } } = await supabase.auth.getSession();
-        const currentUserId = session?.user?.id || null;
-
-        const response = await fetch('https://csxuarismehewgiedoeg.supabase.co/functions/v1/contact-handler', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: formData.name,
-                email: formData.email,
-                phone: formData.phone,
-                message: formData.message,
-                user_id: currentUserId // Gửi kèm User ID
-            })
+        const { data, error } = await supabase.functions.invoke('contact-handler', {
+            body: { 
+                name: formData.name, 
+                email: formData.email, 
+                phone: formData.phone, 
+                message: formData.message 
+            }
         });
 
-        const result = await response.json();
-        if (!response.ok || !result.success) throw new Error(result.error || 'Failed');
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
 
-        toast.success(t("Đã gửi liên hệ thành công!", "Contact sent successfully!"));
-        setFormData({ name: '', email: '', phone: '', message: '' });
+        alert(t("Gửi thành công! Chúng tôi sẽ liên hệ sớm.", "Sent successfully! We will contact you soon."));
         
-        // Nếu đã đăng nhập, reload lại trang hoặc điều hướng để user thấy ticket vừa tạo (nếu có danh sách ticket)
-        if (currentUserId) {
-            // Tùy chọn: Bạn có thể navigate tới trang quản lý ticket nếu có
-            // navigate('/account/tickets');
+        // Reset form nhưng giữ lại tên/email nếu đã login
+        if (session) {
+            setFormData(prev => ({ ...prev, message: '', phone: '', captchaInput: '' }));
+            setShowHistory(true); // Chuyển sang xem lịch sử
+        } else {
+            setFormData({ name: '', email: '', phone: '', message: '', captchaInput: '' });
         }
-
+        generateMathCaptcha();
     } catch (err) {
-        toast.error(err.message);
+        alert(t("Lỗi gửi tin: ", "Error sending: ") + err.message);
     } finally {
         setLoading(false);
     }
   };
 
-  const handleSendReply = async () => {
-      if (!replyMessage.trim()) return;
-      try {
-          const { error } = await supabase.from('contact_replies').insert({
-              contact_id: ticketId,
-              sender_role: 'user',
-              message: replyMessage
-          });
-          if (error) throw error;
-          setReplyMessage('');
-      } catch (err) { toast.error(err.message); }
-  };
-
-  // --- VIEW: CHAT TICKET ---
-  if (ticketId && ticketDetails) {
+  // --- VIEW 1: LỊCH SỬ HỖ TRỢ (Tích hợp AdminContacts) ---
+  if (showHistory && session) {
       return (
-          <div className="max-w-4xl mx-auto py-12 px-4 animate-fade-in">
-              <button onClick={() => navigate('/contact')} className="mb-4 text-slate-500 hover:text-blue-600 text-sm flex items-center gap-1">← {t('Quay lại', 'Back')}</button>
-              
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[70vh]">
-                  {/* Header */}
-                  <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
-                      <div>
-                          <h2 className="font-bold text-slate-800 flex items-center gap-2">
-                              Ticket #{ticketId} 
-                              <span className={`text-xs px-2 py-0.5 rounded-full border ${ticketDetails.status === 'new' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-green-100 text-green-700 border-green-200'}`}>
-                                  {ticketDetails.status.toUpperCase()}
-                              </span>
-                          </h2>
-                          <p className="text-sm text-slate-500">{ticketDetails.email}</p>
-                      </div>
-                  </div>
-
-                  {/* Messages Area */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
-                      {/* Original Message */}
-                      <div className="flex justify-end">
-                          <div className="bg-blue-600 text-white p-3 rounded-l-xl rounded-tr-xl max-w-[80%] text-sm shadow-sm">
-                              <p className="font-bold text-xs mb-1 opacity-80">{t('Bạn', 'You')}</p>
-                              {ticketDetails.message}
-                          </div>
-                      </div>
-
-                      {/* Replies */}
-                      {ticketMessages.map((msg) => (
-                          <div key={msg.id} className={`flex ${msg.sender_role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`p-3 max-w-[80%] text-sm shadow-sm ${
-                                  msg.sender_role === 'user' 
-                                  ? 'bg-blue-600 text-white rounded-l-xl rounded-tr-xl' 
-                                  : 'bg-white border border-slate-200 text-slate-700 rounded-r-xl rounded-tl-xl'
-                              }`}>
-                                  <p className="font-bold text-xs mb-1 opacity-80 uppercase">
-                                      {msg.sender_role === 'user' ? t('Bạn', 'You') : 'Support Team'}
-                                  </p>
-                                  {msg.message}
-                                  <p className={`text-[10px] mt-1 text-right ${msg.sender_role==='user'?'text-blue-100':'text-slate-400'}`}>
-                                      {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                  </p>
-                              </div>
-                          </div>
-                      ))}
-                      <div ref={chatEndRef} />
-                  </div>
-
-                  {/* Input Area */}
-                  <div className="p-4 bg-white border-t border-slate-100 flex gap-2">
-                      <input 
-                          className="flex-1 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder={t("Nhập tin nhắn...", "Type a message...")}
-                          value={replyMessage}
-                          onChange={(e) => setReplyMessage(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleSendReply()}
-                      />
-                      <button onClick={handleSendReply} className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 transition">
-                          <Send size={18} />
-                      </button>
-                  </div>
-              </div>
+          <div className="container mx-auto py-10 px-4 min-h-[80vh]">
+               <div className="flex justify-between items-center mb-6 max-w-5xl mx-auto">
+                    <h1 className="text-2xl font-bold text-slate-800">{t('Trung tâm hỗ trợ', 'Support Center')}</h1>
+                    <button 
+                        onClick={() => {
+                            setShowHistory(false);
+                            setSearchParams({}); // Xóa param trên URL
+                        }} 
+                        className="text-blue-600 font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition"
+                    >
+                        {t('← Quay lại gửi yêu cầu', '← Back to New Request')}
+                    </button>
+               </div>
+               <div className="max-w-5xl mx-auto h-[700px]">
+                    <AdminContacts 
+                        session={session} 
+                        role="user" 
+                        activeTicketId={searchParams.get('ticketId')}
+                        onNewTicket={() => {
+                            setShowHistory(false);
+                            setSearchParams({});
+                        }}
+                    />
+               </div>
           </div>
       );
   }
 
-  // --- VIEW: DEFAULT CONTACT FORM ---
+  // --- VIEW 2: FORM LIÊN HỆ (CODE CŨ ĐÃ ĐƯỢC KHÔI PHỤC) ---
   return (
-    <div className="max-w-6xl mx-auto py-12 px-4 md:px-8">
-      <div className="grid md:grid-cols-2 gap-12 items-start">
-        
-        {/* INFO SECTION */}
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800 mb-4">{t('Liên hệ với chúng tôi', 'Contact Us')}</h1>
-          <p className="text-slate-500 mb-8 leading-relaxed">
-            {t('Chúng tôi luôn sẵn sàng lắng nghe và hỗ trợ bạn. Vui lòng điền vào biểu mẫu hoặc liên hệ trực tiếp qua các kênh bên dưới.', 
-               'We are always ready to listen and support you. Please fill out the form or contact us directly via the channels below.')}
-          </p>
-          
-          <div className="space-y-6">
-            <div className="flex items-start gap-4">
-              <div className="bg-blue-100 p-3 rounded-lg text-blue-600"><Mail size={24} /></div>
-              <div>
-                <h3 className="font-bold text-slate-800">Email</h3>
-                <p className="text-slate-600">{settings.contact_email || 'support@crypto.com'}</p>
-                <p className="text-sm text-slate-400">{t('Phản hồi trong 24h', 'Response within 24h')}</p>
-              </div>
-            </div>
+    <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-lg overflow-hidden md:flex my-10 border border-gray-100">
+        {/* Nút Xem lịch sử (Chỉ hiện khi login) */}
+        {session && (
+             <div className="absolute top-4 right-4 md:right-auto md:left-4 z-50">
+                 {/* Nút này nếu cần có thể đặt ở vị trí khác cho đẹp */}
+             </div>
+        )}
 
-            <div className="flex items-start gap-4">
-              <div className="bg-green-100 p-3 rounded-lg text-green-600"><Phone size={24} /></div>
-              <div>
-                <h3 className="font-bold text-slate-800">Hotline / Zalo</h3>
-                <p className="text-slate-600">{settings.contact_phone || '0988.xxx.xxx'}</p>
-                <p className="text-sm text-slate-400">{t('8:00 - 22:00 Hàng ngày', '8:00 AM - 10:00 PM Daily')}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="bg-indigo-100 p-3 rounded-lg text-indigo-600"><MessageSquare size={24} /></div>
-              <div>
-                <h3 className="font-bold text-slate-800">Telegram Live Chat</h3>
-                <a href={`https://t.me/${settings.contact_telegram?.replace('@','')}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">
-                  {settings.contact_telegram || '@SupportBot'}
-                </a>
-                <p className="text-sm text-slate-400">{t('Hỗ trợ tức thì', 'Instant Support')}</p>
-              </div>
-            </div>
+        {/* === CỘT TRÁI === */}
+        <div className="bg-blue-600 text-white p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-32 h-32 bg-blue-500 rounded-full opacity-50 blur-2xl pointer-events-none"></div>
             
-            <div className="flex items-start gap-4">
-              <div className="bg-orange-100 p-3 rounded-lg text-orange-600"><MapPin size={24} /></div>
-              <div>
-                <h3 className="font-bold text-slate-800">{t('Địa chỉ', 'Address')}</h3>
-                <p className="text-slate-600">{settings.contact_address || 'Vietnam'}</p>
-              </div>
+            <div className="relative z-10">
+                <h2 className="text-2xl font-bold mb-8 flex items-center gap-2">
+                    <Mail className="opacity-80"/> {t('Liên hệ', 'Contact Us')}
+                </h2>
+                
+                <div className="space-y-6 text-sm">
+                    <div className="flex gap-4 items-start group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><MapPin size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">{t('Địa chỉ', 'Address')}</p>
+                            <p className="font-medium leading-relaxed">{settings.contact_address || 'Hà Nội, Việt Nam'}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Send size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">Telegram</p>
+                            <a href={`https://t.me/${settings.contact_telegram?.replace('@','')}`} target="_blank" rel="noreferrer" className="font-medium hover:text-blue-100 transition">
+                                {settings.contact_telegram || '@support'}
+                            </a>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Phone size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">{t('Hotline', 'Phone')}</p>
+                            <a href={`tel:${settings.contact_phone}`} className="font-medium hover:text-blue-100 transition">{settings.contact_phone || '0988.888.888'}</a>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Mail size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">Email</p>
+                            <a href={`mailto:${settings.contact_email}`} className="font-medium hover:text-blue-100 transition">{settings.contact_email || 'support@anvu.vn'}</a>
+                        </div>
+                    </div>
+                </div>
             </div>
-          </div>
+
+            <div className="mt-10 pt-6 border-t border-blue-500 text-xs text-blue-100 text-center relative z-10">
+                <p>{t('Hỗ trợ 24/7 qua Telegram', '24/7 Support via Telegram')}</p>
+            </div>
         </div>
 
-        {/* FORM SECTION */}
-        <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-100">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">{t('Họ và Tên', 'Full Name')}</label>
-              <input 
-                required
-                className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                placeholder="John Doe"
-                value={formData.name}
-                onChange={e => setFormData({...formData, name: e.target.value})}
-              />
-            </div>
+        {/* === CỘT PHẢI === */}
+        <div className="p-8 md:w-2/3 relative">
+            {session && (
+                <button onClick={() => setShowHistory(true)} className="absolute top-6 right-6 flex items-center gap-2 text-blue-600 font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition text-xs">
+                    <MessageSquare size={16}/> {t('Lịch sử Hỗ trợ', 'History')}
+                </button>
+            )}
 
-            <div className="grid md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Email</label>
-                <input 
-                  type="email"
-                  required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                  placeholder="john@example.com"
-                  value={formData.email}
-                  onChange={e => setFormData({...formData, email: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">{t('Số điện thoại', 'Phone Number')}</label>
-                <input 
-                  required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                  placeholder="0912xxxxxx"
-                  value={formData.phone}
-                  onChange={e => setFormData({...formData, phone: e.target.value})}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">{t('Nội dung cần hỗ trợ', 'Message')}</label>
-              <textarea 
-                required
-                rows="4"
-                className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition resize-none"
-                placeholder={t("Vui lòng mô tả chi tiết vấn đề của bạn...", "Please describe your issue in detail...")}
-                value={formData.message}
-                onChange={e => setFormData({...formData, message: e.target.value})}
-              ></textarea>
-            </div>
-
-            <button 
-              disabled={loading}
-              className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-lg hover:bg-blue-700 transition shadow-lg shadow-blue-200 flex items-center justify-center gap-2 disabled:opacity-70"
-            >
-              {loading ? <Loader2 className="animate-spin"/> : <Send size={20}/>}
-              {t('Gửi Yêu Cầu', 'Send Request')}
-            </button>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">{t('Gửi yêu cầu hỗ trợ', 'Send Request')}</h2>
+            <p className="text-slate-500 text-sm mb-6">{t('Vui lòng điền thông tin bên dưới, chúng tôi sẽ phản hồi sớm nhất.', 'Please fill out the form below, we will reply shortly.')}</p>
             
-            <p className="text-xs text-center text-slate-400 mt-4">
-              {t('Bằng việc gửi biểu mẫu này, bạn đồng ý để chúng tôi liên hệ lại qua Email hoặc SĐT.', 'By sending this form, you agree to let us contact you via Email or Phone.')}
-            </p>
-          </form>
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Họ và tên', 'Full Name')}</label>
+                        <input required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
+                            placeholder={t("Nhập tên của bạn...", "Enter your name...")} 
+                            value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})}/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Số điện thoại', 'Phone Number')}</label>
+                        <input required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
+                            placeholder={t("Nhập số điện thoại...", "Enter phone number...")} 
+                            value={formData.phone} onChange={e=>setFormData({...formData, phone: e.target.value})}/>
+                    </div>
+                </div>
+                
+                <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Email</label>
+                    <div className="relative">
+                        {/* QUAN TRỌNG: Bỏ thuộc tính readOnly để khách vẫn sửa được email dù đã tự điền */}
+                        <input type="email" required 
+                            className={`w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white`}
+                            placeholder="example@gmail.com" 
+                            value={formData.email} 
+                            onChange={e => setFormData({...formData, email: e.target.value})}
+                        />
+                        {session && <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 opacity-50" />}
+                    </div>
+                    {session && <p className="text-[10px] text-blue-600 mt-1 italic">
+                        {t("Email đã được tự động điền từ tài khoản của bạn. Bạn có thể thay đổi nếu cần liên hệ qua email khác.", "Email auto-filled. You can change it if needed.")}
+                    </p>}
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Nội dung', 'Message')}</label>
+                    <textarea required className="w-full border border-gray-200 p-3 rounded-xl h-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition resize-none bg-slate-50 focus:bg-white" 
+                        placeholder={t("Bạn cần hỗ trợ vấn đề gì?", "How can we help you?")} 
+                        value={formData.message} onChange={e=>setFormData({...formData, message: e.target.value})}></textarea>
+                </div>
+                
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center gap-3 font-bold text-blue-700 bg-white px-4 py-2 rounded-lg border shadow-sm select-none">
+                        <Calculator size={20} className="text-blue-600"/> 
+                        <span className="text-lg tracking-wide">{mathProblem.a} + {mathProblem.b} = ?</span>
+                    </div>
+                    <button type="button" onClick={generateMathCaptcha} className="p-2 text-gray-400 hover:text-blue-600 bg-white rounded-full border hover:border-blue-400 transition" title={t('Đổi câu hỏi', 'Refresh')}>
+                        <RefreshCw size={18}/>
+                    </button>
+                    <input required type="number" className="border border-gray-300 p-2 rounded-lg w-32 text-center font-bold text-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                        placeholder={t('Kết quả', 'Result')} 
+                        value={formData.captchaInput} onChange={e=>setFormData({...formData, captchaInput: e.target.value})}/>
+                </div>
+
+                <button disabled={loading} className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200 flex justify-center items-center gap-2 transform active:scale-[0.99]">
+                    {loading ? t('Đang gửi...', 'Sending...') : <><Send size={18}/> {t('Gửi Yêu Cầu', 'Send Message')}</>}
+                </button>
+            </form>
         </div>
-      </div>
     </div>
   );
 }

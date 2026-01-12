@@ -31,7 +31,7 @@ export default function AdminSettings() {
       if(error) return toast.error(error.message);
       const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
       setSiteSettings({ ...siteSettings, site_logo_url: data.publicUrl });
-      toast.success(t("Tải lên Logo thành công!", "Upload Logo successfully!"));
+      toast.success("Upload Logo thành công!");
   };
 
   const saveConfig = async (e) => { 
@@ -51,141 +51,38 @@ export default function AdminSettings() {
 
   return (
     <form onSubmit={saveConfig} className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 max-w-4xl mx-auto space-y-6 animate-fade-in">
-       <h2 className="font-bold border-b pb-4 text-lg text-slate-800">
-          {t("Cấu hình hệ thống", "System Configuration")}
-       </h2>
-       
-       {/* SHOP INFO */}
+       <h2 className="font-bold border-b pb-4 text-lg text-slate-800">System Configuration</h2>
        <div className="grid grid-cols-2 gap-6">
-           <div>
-               <label className="block text-sm font-bold mb-2 text-slate-600">Logo</label>
-               <div className="flex gap-3 items-center">
-                   <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition">
-                       {t("Tải lên", "Upload")} 
-                       <input type="file" className="hidden" onChange={handleImageUpload}/>
-                   </label>
-                   {siteSettings.site_logo_url && <img src={siteSettings.site_logo_url} className="h-10 border rounded bg-white p-1" alt="Logo"/>}
-               </div>
-           </div>
-           <div>
-               <label className="block text-sm font-bold mb-2 text-slate-600">{t("Tên cửa hàng", "Shop Name")}</label>
-               <input 
-                   className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                   value={siteSettings.site_name||''} 
-                   onChange={e=>setSiteSettings({...siteSettings,site_name:e.target.value})}
-               />
-           </div>
+           <div><label className="block text-sm font-bold mb-2 text-slate-600">Logo</label><div className="flex gap-3 items-center"><label className="cursor-pointer bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition">Upload <input type="file" className="hidden" onChange={handleImageUpload}/></label>{siteSettings.site_logo_url && <img src={siteSettings.site_logo_url} className="h-10 border rounded bg-white p-1"/>}</div></div>
+           <div><label className="block text-sm font-bold mb-2 text-slate-600">Shop Name</label><input className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={siteSettings.site_name||''} onChange={e=>setSiteSettings({...siteSettings,site_name:e.target.value})}/></div>
        </div>
-
-       {/* FOOTER */}
        <div className="space-y-4">
-           <div>
-               <label className="block text-sm font-bold mb-2 text-slate-600">{t("Nội dung chân trang (VN)", "Footer Text (VN)")}</label>
-               <textarea 
-                   className="w-full border p-2.5 rounded-lg h-20 resize-none focus:ring-2 focus:ring-blue-500 outline-none" 
-                   value={siteSettings.footer_text||''} 
-                   onChange={e=>setSiteSettings({...siteSettings,footer_text:e.target.value})}
-               />
-           </div>
-           <div>
-               <label className="block text-sm font-bold mb-2 text-slate-600">{t("Nội dung chân trang (EN)", "Footer Text (EN)")}</label>
-               <textarea 
-                   className="w-full border p-2.5 rounded-lg h-20 resize-none focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" 
-                   value={siteSettings.footer_text_en||''} 
-                   onChange={e=>setSiteSettings({...siteSettings,footer_text_en:e.target.value})}
-               />
-           </div>
+           <div><label className="block text-sm font-bold mb-2 text-slate-600">Footer Text (VN)</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={siteSettings.footer_text||''} onChange={e=>setSiteSettings({...siteSettings,footer_text:e.target.value})}/></div>
+           <div><label className="block text-sm font-bold mb-2 text-slate-600">Footer Text (EN)</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" value={siteSettings.footer_text_en||''} onChange={e=>setSiteSettings({...siteSettings,footer_text_en:e.target.value})}/></div>
        </div>
-
-       {/* CONTACT INFO */}
        <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 space-y-4">
-           <h3 className="font-bold text-blue-800">{t("Thông tin liên hệ", "Contact Information")}</h3>
+           <h3 className="font-bold text-blue-800">Contact Information</h3>
            <div className="grid grid-cols-2 gap-4">
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1">{t("Email hỗ trợ", "Email Support")}</label>
-                   <input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_email||''} onChange={e=>setSiteSettings({...siteSettings,contact_email:e.target.value})}/>
-               </div>
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1">{t("Hotline", "Hotline")}</label>
-                   <input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_phone||''} onChange={e=>setSiteSettings({...siteSettings,contact_phone:e.target.value})}/>
-               </div>
+               <div><label className="block text-xs font-bold uppercase mb-1">Email Support</label><input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_email||''} onChange={e=>setSiteSettings({...siteSettings,contact_email:e.target.value})}/></div>
+               <div><label className="block text-xs font-bold uppercase mb-1">Hotline</label><input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_phone||''} onChange={e=>setSiteSettings({...siteSettings,contact_phone:e.target.value})}/></div>
            </div>
            <div className="grid grid-cols-3 gap-4">
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1">{t("Địa chỉ", "Address")}</label>
-                   <input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_address||''} onChange={e=>setSiteSettings({...siteSettings,contact_address:e.target.value})}/>
-               </div>
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1">Zalo</label>
-                   <input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_zalo||''} onChange={e=>setSiteSettings({...siteSettings,contact_zalo:e.target.value})}/>
-               </div>
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1">Telegram</label>
-                   <input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_telegram||''} onChange={e=>setSiteSettings({...siteSettings,contact_telegram:e.target.value})}/>
-               </div>
+               <div><label className="block text-xs font-bold uppercase mb-1">Address</label><input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_address||''} onChange={e=>setSiteSettings({...siteSettings,contact_address:e.target.value})}/></div>
+               <div><label className="block text-xs font-bold uppercase mb-1">Zalo</label><input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_zalo||''} onChange={e=>setSiteSettings({...siteSettings,contact_zalo:e.target.value})}/></div>
+               <div><label className="block text-xs font-bold uppercase mb-1">Telegram</label><input className="w-full border p-2 rounded-lg bg-white" value={siteSettings.contact_telegram||''} onChange={e=>setSiteSettings({...siteSettings,contact_telegram:e.target.value})}/></div>
            </div>
        </div>
-
-       {/* PRIVATE KEYS */}
        <div className="bg-red-50 p-5 rounded-xl border border-red-100">
-           <h3 className="text-red-700 font-bold mb-3 flex items-center gap-2">
-               <Key size={18}/> {t("Khóa bảo mật (Server Only)", "Private Keys (Server Only)")}
-           </h3>
+           <h3 className="text-red-700 font-bold mb-3 flex items-center gap-2"><Key size={18}/> Private Keys (Server Only)</h3>
            <div className="space-y-3">
-               {/* Oxapay Key */}
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1 text-red-800 opacity-70">Oxapay Merchant Key</label>
-                   <input 
-                       className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" 
-                       type="password" 
-                       placeholder="Oxapay Merchant Key" 
-                       value={configs.OXAPAY_MERCHANT_KEY||''} 
-                       onChange={e=>setConfigs({...configs,OXAPAY_MERCHANT_KEY:e.target.value})}
-                   />
-               </div>
-
-               {/* Resend API Key - MỚI THÊM */}
-               <div>
-                   <label className="block text-xs font-bold uppercase mb-1 text-red-800 opacity-70">Resend API Key (Email)</label>
-                   <input 
-                       className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" 
-                       type="password" 
-                       placeholder="re_12345678..." 
-                       value={configs.RESEND_API_KEY||''} 
-                       onChange={e=>setConfigs({...configs,RESEND_API_KEY:e.target.value})}
-                   />
-               </div>
-
-               {/* Telegram Config */}
+               <input className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" type="password" placeholder="Oxapay Merchant Key" value={configs.OXAPAY_MERCHANT_KEY||''} onChange={e=>setConfigs({...configs,OXAPAY_MERCHANT_KEY:e.target.value})}/>
                <div className="flex gap-3">
-                   <div className="w-full">
-                       <label className="block text-xs font-bold uppercase mb-1 text-red-800 opacity-70">Telegram Bot Token</label>
-                       <input 
-                           className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" 
-                           type="password"
-                           placeholder="Bot Token" 
-                           value={configs.TELEGRAM_BOT_TOKEN||''} 
-                           onChange={e=>setConfigs({...configs,TELEGRAM_BOT_TOKEN:e.target.value})}
-                       />
-                   </div>
-                   <div className="w-full">
-                       <label className="block text-xs font-bold uppercase mb-1 text-red-800 opacity-70">Telegram Chat ID</label>
-                       <input 
-                           className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" 
-                           placeholder="Chat ID" 
-                           value={configs.TELEGRAM_CHAT_ID||''} 
-                           onChange={e=>setConfigs({...configs,TELEGRAM_CHAT_ID:e.target.value})}
-                       />
-                   </div>
+                   <input className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" type="password" placeholder="Telegram Bot Token" value={configs.TELEGRAM_BOT_TOKEN||''} onChange={e=>setConfigs({...configs,TELEGRAM_BOT_TOKEN:e.target.value})}/>
+                   <input className="w-full border p-2.5 rounded-lg bg-white font-mono text-sm" placeholder="Chat ID" value={configs.TELEGRAM_CHAT_ID||''} onChange={e=>setConfigs({...configs,TELEGRAM_CHAT_ID:e.target.value})}/>
                </div>
            </div>
        </div>
-       
-       <div className="flex justify-end pt-4">
-           <button className="bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 transition shadow-lg shadow-green-200">
-               {t("Lưu cấu hình", "Save Configuration")}
-           </button>
-       </div>
+       <div className="flex justify-end pt-4"><button className="bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 transition shadow-lg shadow-green-200">Save Configuration</button></div>
     </form>
   );
 }
