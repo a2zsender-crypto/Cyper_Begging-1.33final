@@ -66,6 +66,18 @@ const AdminOrders = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
+  // --- FIX: TỪ ĐIỂN TRẠNG THÁI ---
+  const statusLabels = {
+      all: t('Tất cả', 'All'),
+      pending: t('Chờ xử lý', 'Pending'),
+      paid: t('Đã thanh toán', 'Paid'),
+      shipping: t('Đang vận chuyển', 'Shipping'),
+      completed: t('Hoàn thành', 'Completed'),
+      cancelled: t('Đã hủy', 'Cancelled'),
+      expired: t('Hết hạn', 'Expired'),
+      failed: t('Thất bại', 'Failed')
+  };
+
   useEffect(() => {
     checkUserRole();
     fetchOrders();
@@ -102,26 +114,26 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM ĐÃ ĐƯỢC SỬA: SỬ DỤNG FETCH THAY VÌ SUPABASE.INVOKE ---
+  // --- HÀM ĐÃ SỬA: DÙNG FETCH THAY VÌ SUPABASE.INVOKE ĐỂ TRÁNH LỖI CORS ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
-      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành ${newStatus}?`, `Confirm update status to ${newStatus}?`))) return;
+      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. Lấy token xác thực hiện tại
+          // 1. Lấy Session Token hiện tại
           const { data: { session } } = await supabase.auth.getSession();
-          if (!session) throw new Error("Phiên đăng nhập hết hạn / Session expired");
+          if (!session) throw new Error(t("Phiên đăng nhập hết hạn", "Session expired"));
 
-          // 2. Gọi trực tiếp endpoint (Bypass lỗi Preflight của thư viện client)
-          // URL lấy từ log của bạn: https://csxuarismehewgiedoeg.supabase.co/functions/v1/admin-actions
+          // 2. URL Function (Lấy từ log lỗi của bạn)
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/admin-actions';
-          
+
+          // 3. Gọi Fetch thủ công
           const response = await fetch(FUNCTION_URL, {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}` // Gửi token thủ công
+                  'Authorization': `Bearer ${session.access_token}` // Tự gửi Token xác thực
               },
               body: JSON.stringify({ 
                   action: 'update_order_status', 
@@ -131,17 +143,17 @@ const AdminOrders = () => {
               })
           });
 
-          // 3. Xử lý phản hồi
-          const result = await response.json();
+          const data = await response.json();
 
           if (!response.ok) {
-              throw new Error(result.error || `Lỗi server: ${response.status}`);
+              throw new Error(data.error || "Request failed");
           }
+          
+          if (data.error) throw new Error(data.error);
 
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
           fetchOrders();
           setSelectedOrder(prev => ({...prev, status: newStatus}));
-
       } catch (err) {
           console.error("Update Error:", err);
           toast.error(err.message || "Update failed");
@@ -149,7 +161,6 @@ const AdminOrders = () => {
           setUpdatingStatus(false);
       }
   };
-  // -------------------------------------------------------------
 
   const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
   const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US') : '';
@@ -162,11 +173,13 @@ const AdminOrders = () => {
       completed: 'bg-green-100 text-green-800 border-green-200',
       expired: 'bg-gray-100 text-gray-800 border-gray-200',
       failed: 'bg-red-100 text-red-800 border-red-200',
-      shipping: 'bg-purple-100 text-purple-800 border-purple-200'
+      shipping: 'bg-purple-100 text-purple-800 border-purple-200',
+      cancelled: 'bg-red-100 text-red-800 border-red-200'
     };
     return (
       <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.expired}`}>
-        <span className="capitalize">{status}</span>
+        {/* FIX: HIỂN THỊ TEXT DỊCH */}
+        <span className="capitalize">{statusLabels[status] || status}</span>
       </span>
     );
   };
@@ -203,7 +216,8 @@ const AdminOrders = () => {
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border
                   ${filterStatus === status ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               >
-                {status === 'all' ? t('Tất cả', 'All') : status}
+                {/* FIX: HIỂN THỊ TEXT DỊCH CHO NÚT LỌC */}
+                {statusLabels[status] || status}
               </button>
             ))}
           </div>
@@ -264,7 +278,7 @@ const AdminOrders = () => {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8">
-              {/* CẬP NHẬT TRẠNG THÁI (Chỉ hiện với ADMIN) */}
+              {/* FIX: CẬP NHẬT TRẠNG THÁI VỚI TEXT DỊCH */}
               {userRole === 'admin' && (
                   <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div className="flex items-center gap-2">
@@ -280,11 +294,11 @@ const AdminOrders = () => {
                               onChange={(e) => setNewStatus(e.target.value)}
                               className="border border-indigo-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           >
-                              <option value="pending">Pending</option>
-                              <option value="paid">Paid</option>
-                              <option value="shipping">Shipping</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
+                              <option value="pending">{statusLabels['pending']}</option>
+                              <option value="paid">{statusLabels['paid']}</option>
+                              <option value="shipping">{statusLabels['shipping']}</option>
+                              <option value="completed">{statusLabels['completed']}</option>
+                              <option value="cancelled">{statusLabels['cancelled']}</option>
                           </select>
                           <button 
                               onClick={handleUpdateStatus} 
@@ -306,12 +320,9 @@ const AdminOrders = () => {
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name || 'N/A'}</p>
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
                     
-                    {/* --- FIX: HIỂN THỊ ĐỊA CHỈ SHIP (Nếu có sản phẩm vật lý) --- */}
+                    {/* HIỂN THỊ ĐỊA CHỈ SHIP (Nếu có sản phẩm vật lý) */}
                     {(() => {
-                        // Check xem đơn hàng có sp vật lý không
                         const hasPhysical = selectedOrder.order_items?.some(i => i.products?.is_digital === false);
-                        
-                        // Chỉ hiển thị nếu có hàng vật lý VÀ có thông tin địa chỉ
                         if (hasPhysical && selectedOrder.shipping_address) {
                             return (
                                 <div className="mt-3 pt-3 border-t border-blue-200 text-sm">
