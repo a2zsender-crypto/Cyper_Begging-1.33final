@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useLang } from '../../context/LangContext';
+import { useSearchParams } from 'react-router-dom'; // QUAN TRỌNG: Để bắt URL
 
 // --- COMPONENT CON: HIỂN THỊ KEY BẢO MẬT ---
 const MaskedKeyDisplay = ({ text, t }) => {
@@ -62,6 +63,10 @@ const AdminOrders = () => {
   const [userRole, setUserRole] = useState('user'); 
   const ITEMS_PER_PAGE = 10;
 
+  // --- LOGIC DEEP LINKING (Ý tưởng của bạn) ---
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlOrderId = searchParams.get('orderId');
+
   // State cho việc update status
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
@@ -82,6 +87,35 @@ const AdminOrders = () => {
     checkUserRole();
     fetchOrders();
   }, [page, filterStatus]); 
+
+  // --- EFFECT: TỰ ĐỘNG MỞ MODAL KHI CÓ ORDER ID TRÊN URL ---
+  useEffect(() => {
+      if (urlOrderId) {
+          // Fetch riêng đơn hàng này (để đảm bảo có dữ liệu dù nó nằm ở trang khác)
+          const fetchDeepLinkOrder = async () => {
+              const { data, error } = await supabase
+                  .from('orders')
+                  .select(`*, order_items (*, products (title, title_en, images, price, is_digital))`)
+                  .eq('id', urlOrderId)
+                  .single();
+              
+              if (data && !error) {
+                  setSelectedOrder(data);
+                  setNewStatus(data.status);
+              }
+          };
+          fetchDeepLinkOrder();
+      }
+  }, [urlOrderId]);
+
+  // Khi đóng Modal thì xóa param trên URL để sạch sẽ
+  const closeOrderModal = () => {
+      setSelectedOrder(null);
+      if (urlOrderId) {
+          searchParams.delete('orderId');
+          setSearchParams(searchParams);
+      }
+  };
 
   const checkUserRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -114,14 +148,14 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FULL OPTION) ---
+  // --- HÀM UPDATE STATUS (FIXED: Link đúng & Email Auth) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE TRỰC TIẾP VÀO DB ORDERS
+          // 1. UPDATE TRỰC TIẾP VÀO DB
           const { error } = await supabase
               .from('orders')
               .update({ status: newStatus })
@@ -129,8 +163,7 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHO USER (Chỉ nếu user_id tồn tại)
-          // Đã fix lỗi nhờ Policy SQL "Admins can insert notifications"
+          // 2. TẠO THÔNG BÁO (KÈM DEEP LINK)
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               const statusText = statusLabels[newStatus] || newStatus;
@@ -138,12 +171,16 @@ const AdminOrders = () => {
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
                   : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
 
+              // --- ĐÂY LÀ PHẦN LINK THẲNG VÀO MODAL ---
+              // Giả sử trang quản lý là /admin (tab orders)
+              const deepLink = `/admin?tab=orders&orderId=${selectedOrder.id}`;
+
               const { error: notifError } = await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
-                  link: `/cart`,
+                  link: deepLink, 
                   is_read: false
               });
               if (notifError) console.error("Notification Error:", notifError);
@@ -152,7 +189,7 @@ const AdminOrders = () => {
           // 3. GỬI TELEGRAM (Client-side)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (FIXED: Thêm Auth Token)
+          // 4. GỬI EMAIL (FIXED: Có Token)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Cập nhật giao diện
@@ -183,11 +220,13 @@ const AdminOrders = () => {
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Hàm gửi Email qua Function (Đã fix Auth Header)
+  // Hàm gửi Email (FIX: Thêm Token Authentication)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
+          
+          // Dù user thường hay admin đều cần token để qua cửa Edge Function
           if (!token) return;
 
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
@@ -196,7 +235,7 @@ const AdminOrders = () => {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
+                  'Authorization': `Bearer ${token}` // QUAN TRỌNG NHẤT
               },
               body: JSON.stringify({ email, orderId, status, lang })
           }).catch(e => console.warn("Email func error:", e));
@@ -313,7 +352,7 @@ const AdminOrders = () => {
                 <h3 className="text-xl font-bold text-slate-800">{t('Chi tiết đơn hàng', 'Order Details')} #{selectedOrder.id}</h3>
                 <p className="text-sm text-slate-500 mt-1">{new Date(selectedOrder.created_at).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US')}</p>
               </div>
-              <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><XCircle size={24} /></button>
+              <button onClick={closeOrderModal} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><XCircle size={24} /></button>
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8">
