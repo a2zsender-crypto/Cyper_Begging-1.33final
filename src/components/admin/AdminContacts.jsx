@@ -76,14 +76,17 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT (QUAN TRỌNG: Logic cũ của bạn hoạt động tốt, tôi giữ nguyên logic lắng nghe)
+  // REALTIME CHAT (Sửa lại logic ID và check duplicate)
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-${showTicketModal.id}`)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contact_replies' }, payload => {
-              // So sánh ID dạng string để an toàn
+              // Chỉ thêm nếu tin nhắn chưa tồn tại (tránh hiển thị 2 lần do mình đã add tay trước đó)
               if (payload.new.contact_id.toString() === showTicketModal.id.toString()) {
-                  setTicketReplies(prev => [...prev, payload.new]);
+                  setTicketReplies(prev => {
+                      if (prev.some(r => r.id === payload.new.id)) return prev;
+                      return [...prev, payload.new];
+                  });
               }
           })
           .subscribe();
@@ -109,19 +112,31 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       }
   };
 
+  // FIX: Hiển thị ngay lập tức khi gửi (Optimistic UI)
   const handleSendReply = async (e) => {
       e.preventDefault();
       if (!replyMessage.trim()) return;
+      
+      const messageToSend = replyMessage;
+      setReplyMessage(''); // Xóa ô nhập liệu ngay cho mượt
+
       try {
-          const { error } = await supabase.from('contact_replies').insert({
+          const { data, error } = await supabase.from('contact_replies').insert({
               contact_id: showTicketModal.id, 
               sender_role: role, 
-              message: replyMessage
-          });
+              message: messageToSend
+          }).select().single();
+
           if (error) throw error;
-          setReplyMessage('');
-          // KHÔNG setTicketReplies ở đây, để Realtime tự lo (như logic cũ của bạn)
-      } catch (err) { toast.error(err.message); }
+
+          // Cập nhật ngay vào danh sách chat (Không chờ Realtime)
+          if (data) {
+              setTicketReplies(prev => [...prev, data]);
+          }
+      } catch (err) { 
+          toast.error(err.message);
+          setReplyMessage(messageToSend); // Hoàn lại tin nhắn nếu lỗi
+      }
   };
 
   const handleNewTicketClick = () => {
@@ -135,7 +150,6 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
   return (
     <div className="animate-fade-in h-full flex flex-col">
        <div className="flex justify-between items-center mb-6 shrink-0">
-           {/* Tiêu đề đã dịch */}
            <h2 className="text-2xl font-bold text-slate-800">
                {role === 'admin' ? t('Yêu cầu hỗ trợ', 'Support Requests') : t('Vé hỗ trợ của tôi', 'My Support Tickets')}
            </h2>
