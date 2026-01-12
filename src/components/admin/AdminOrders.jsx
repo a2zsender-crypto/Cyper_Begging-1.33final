@@ -114,7 +114,7 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FULL OPTION: DB + TELEGRAM + EMAIL) ---
+  // --- HÀM UPDATE STATUS (FIXED: Gửi Email có Auth Header & Debug Notification) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
@@ -130,26 +130,32 @@ const AdminOrders = () => {
           if (error) throw error;
 
           // 2. TẠO THÔNG BÁO CHO USER (Bell Notification)
+          // Lưu ý: Chỉ tạo nếu đơn hàng có gắn với tài khoản User (user_id khác null)
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật đơn hàng' : 'Order Update';
               const notifMsg = lang === 'vi' 
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang trạng thái: ${statusLabels[newStatus]}`
                   : `Order #${selectedOrder.id} status updated to: ${statusLabels[newStatus] || newStatus}`;
 
-              await supabase.from('notifications').insert({
+              const { error: notifError } = await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
                   is_read: false
               });
+              
+              if (notifError) console.error("Lỗi tạo thông báo:", notifError);
+              else console.log("Đã tạo thông báo cho user:", selectedOrder.user_id);
+          } else {
+              console.log("Đơn hàng khách vãng lai (Guest), không tạo thông báo chuông.");
           }
 
-          // 3. GỬI TELEGRAM (Client-side Direct Call - Nhanh)
+          // 3. GỬI TELEGRAM (Client-side Direct Call)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (Qua Edge Function mới - An toàn)
-          // Fire & Forget: Không await để tránh làm chậm UI
+          // 4. GỬI EMAIL (FIXED: Thêm Token Authentication)
+          // Chúng ta cần lấy session token để gửi kèm request, nếu không Supabase Gateway sẽ chặn
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Cập nhật giao diện
@@ -174,30 +180,43 @@ const AdminOrders = () => {
 
           if (!botToken || !chatId) return;
 
-          const text = `👮 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
+          const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
           await fetch(url, { mode: 'no-cors' });
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Hàm gửi Email qua Function
+  // Hàm gửi Email qua Function (ĐÃ SỬA: THÊM HEADER AUTH)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
-          // Thay URL này bằng URL thật của function 'send-order-email'
+          // Lấy session token hiện tại của Admin
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+
+          if (!token) {
+              console.warn("Không tìm thấy token, hủy gửi email");
+              return;
+          }
+
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
           
           fetch(FUNCTION_URL, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}` // QUAN TRỌNG: Thêm header này để qua cổng bảo mật
+              },
               body: JSON.stringify({ 
                   email, 
                   orderId, 
                   status, 
                   lang 
               })
+          }).then(res => {
+              if (!res.ok) console.warn("Email function response not ok:", res.status);
           }).catch(e => console.warn("Email function error:", e));
-      } catch (e) { console.warn("Email warning:", e); }
+      } catch (e) { console.warn("Email logic warning:", e); }
   };
 
   const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
