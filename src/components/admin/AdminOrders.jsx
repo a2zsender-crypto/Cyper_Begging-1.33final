@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useLang } from '../../context/LangContext';
+import { useSearchParams } from 'react-router-dom';
 
 // --- COMPONENT CON: HIỂN THỊ KEY BẢO MẬT ---
 const MaskedKeyDisplay = ({ text, t }) => {
@@ -62,11 +63,13 @@ const AdminOrders = () => {
   const [userRole, setUserRole] = useState('user'); 
   const ITEMS_PER_PAGE = 10;
 
-  // State cho việc update status
+  // Deep Link Logic
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlOrderId = searchParams.get('orderId');
+
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
-  // TỪ ĐIỂN TRẠNG THÁI
   const statusLabels = {
       all: t('Tất cả', 'All'),
       pending: t('Chờ xử lý', 'Pending'),
@@ -82,6 +85,33 @@ const AdminOrders = () => {
     checkUserRole();
     fetchOrders();
   }, [page, filterStatus]); 
+
+  // Deep Link Auto Open
+  useEffect(() => {
+      if (urlOrderId) {
+          const fetchDeepLinkOrder = async () => {
+              const { data, error } = await supabase
+                  .from('orders')
+                  .select(`*, order_items (*, products (title, title_en, images, price, is_digital))`)
+                  .eq('id', urlOrderId)
+                  .single();
+              
+              if (data && !error) {
+                  setSelectedOrder(data);
+                  setNewStatus(data.status);
+              }
+          };
+          fetchDeepLinkOrder();
+      }
+  }, [urlOrderId]);
+
+  const closeOrderModal = () => {
+      setSelectedOrder(null);
+      if (urlOrderId) {
+          searchParams.delete('orderId');
+          setSearchParams(searchParams);
+      }
+  };
 
   const checkUserRole = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -114,14 +144,14 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FULL OPTION) ---
+  // --- HÀM UPDATE STATUS (ĐÃ SỬA: TIÊU ĐỀ TELEGRAM & QUYỀN GỬI) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE TRỰC TIẾP VÀO DB ORDERS
+          // 1. UPDATE DB (Admin needs permission via RLS - See SQL below)
           const { error } = await supabase
               .from('orders')
               .update({ status: newStatus })
@@ -129,8 +159,7 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHO USER (Chỉ nếu user_id tồn tại)
-          // Đã fix lỗi nhờ Policy SQL "Admins can insert notifications"
+          // 2. TẠO THÔNG BÁO CHO USER (QUAN TRỌNG: Cần SQL Admin Policy để chạy đc dòng này)
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               const statusText = statusLabels[newStatus] || newStatus;
@@ -138,24 +167,28 @@ const AdminOrders = () => {
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
                   : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
 
+              const deepLink = `/cart?orderId=${selectedOrder.id}`;
+
               const { error: notifError } = await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
-                  link: `/cart`,
+                  link: deepLink,
                   is_read: false
               });
-              if (notifError) console.error("Notification Error:", notifError);
+              
+              if (notifError) console.error("Lỗi Notification (Cần chạy SQL Full):", notifError);
+              else console.log("Đã tạo thông báo chuông OK");
           }
 
-          // 3. GỬI TELEGRAM (Client-side)
+          // 3. GỬI TELEGRAM (Client-side Direct)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (FIXED: Thêm Auth Token)
+          // 4. GỬI EMAIL (Via Function - Kèm Token Admin)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
-          // 5. Cập nhật giao diện
+          // 5. Update UI
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
           setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: newStatus } : o));
           setSelectedOrder(prev => ({...prev, status: newStatus}));
@@ -168,6 +201,7 @@ const AdminOrders = () => {
       }
   };
 
+  // Sửa tiêu đề Tele theo yêu cầu
   const sendDirectTelegram = async (orderId, status) => {
       try {
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
@@ -176,14 +210,14 @@ const AdminOrders = () => {
 
           if (!botToken || !chatId) return;
 
-          const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
+          // SỬA Ở ĐÂY: Tiêu đề tiếng Anh chuẩn
+          const text = `📦 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
           await fetch(url, { mode: 'no-cors' });
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Hàm gửi Email qua Function (Đã fix Auth Header)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
@@ -313,7 +347,7 @@ const AdminOrders = () => {
                 <h3 className="text-xl font-bold text-slate-800">{t('Chi tiết đơn hàng', 'Order Details')} #{selectedOrder.id}</h3>
                 <p className="text-sm text-slate-500 mt-1">{new Date(selectedOrder.created_at).toLocaleString(lang === 'vi' ? 'vi-VN' : 'en-US')}</p>
               </div>
-              <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><XCircle size={24} /></button>
+              <button onClick={closeOrderModal} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><XCircle size={24} /></button>
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8">

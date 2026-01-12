@@ -124,7 +124,7 @@ export default function Layout() {
       await supabase.from('notifications')
           .update({ is_read: true })
           .eq('user_id', session.user.id)
-          .eq('is_read', false); // Chỉ update những cái chưa đọc cho nhẹ DB
+          .eq('is_read', false); 
   };
 
   const handleLogout = async () => { 
