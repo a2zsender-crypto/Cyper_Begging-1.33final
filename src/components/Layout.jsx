@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck, Shield } from 'lucide-react'; // Thêm Shield icon
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -18,7 +18,9 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotiDropdown, setShowNotiDropdown] = useState(false);
   const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null); // Thêm state role
+  
+  // State mới: Lưu quyền hạn (Admin/Mod)
+  const [role, setRole] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,20 +36,20 @@ export default function Layout() {
     staleTime: 1000 * 60 * 10
   });
 
-  // Lấy role user
+  // Hàm lấy role
   const fetchRole = async (uid) => {
-      const { data } = await supabase.from('profiles').select('role').eq('id', uid).single();
-      if (data) setRole(data.role);
+    const { data } = await supabase.from('profiles').select('role').eq('id', uid).single();
+    if (data) setRole(data.role);
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { 
         setSession(session); 
-        if(session?.user) fetchRole(session.user.id);
+        if (session?.user) fetchRole(session.user.id);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { 
         setSession(session); 
-        if(session?.user) fetchRole(session.user.id);
+        if (session?.user) fetchRole(session.user.id);
         else setRole(null);
     });
     return () => subscription.unsubscribe();
@@ -144,7 +146,6 @@ export default function Layout() {
   const handleLogout = async () => { 
       await supabase.auth.signOut(); 
       localStorage.clear(); 
-      setRole(null);
       navigate('/login'); 
   };
 
@@ -236,17 +237,20 @@ export default function Layout() {
             </Link>
 
             <div className="group relative hidden md:block">
-                <Link to={role === 'admin' || role === 'mod' ? '/admin' : '/support'} className="hover:text-blue-600 block py-2">
+                {/* Chỉ dẫn đến Admin nếu có quyền, nếu không thì dẫn đến Support (Profile) */}
+                <Link to={(role === 'admin' || role === 'mod') ? "/admin" : "/support"} className="hover:text-blue-600 block py-2">
                     <User size={22} />
                 </Link>
                 <div className="absolute right-0 top-full pt-2 w-56 hidden group-hover:block z-50">
                     <div className="bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
-                        {/* PANEL LINK - HIỂN THỊ CHO ADMIN & MOD */}
+                        
+                        {/* HIỂN THỊ LINK ADMIN CHO ADMIN VÀ MOD */}
                         {(role === 'admin' || role === 'mod') && (
                             <Link to="/admin" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-blue-700 transition border-b border-gray-100">
                                 <Shield size={16}/> {t('Quản trị viên', 'Admin Panel')}
                             </Link>
                         )}
+
                         <Link to="/support" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
                             <User size={16}/> {t('Tài khoản', 'My Account')}
                         </Link>
@@ -268,11 +272,13 @@ export default function Layout() {
                     <Link to="/support" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Hỗ trợ', 'Support')} <ChevronRight size={16}/></Link>
                     <Link to="/contact" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Liên hệ', 'Contact')} <ChevronRight size={16}/></Link>
                     
-                    {/* Mobile Admin Link */}
+                    {/* MOBILE LINK CHO ADMIN/MOD */}
                     {(role === 'admin' || role === 'mod') && (
-                        <Link to="/admin" className="flex justify-between items-center py-2 text-blue-600 font-bold border-b border-slate-50">{t('Quản trị viên', 'Admin Panel')} <Shield size={16}/></Link>
+                        <Link to="/admin" className="flex justify-between items-center py-2 text-blue-600 font-bold border-b border-slate-50">
+                            {t('Quản trị viên', 'Admin Panel')} <Shield size={16}/>
+                        </Link>
                     )}
-                    
+
                     <Link to="/support" className="flex justify-between items-center py-2 hover:text-blue-600">{t('Tài khoản', 'Account')} <User size={16}/></Link>
                 </div>
             </div>
