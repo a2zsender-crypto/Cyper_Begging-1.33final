@@ -67,11 +67,9 @@ const AdminOrders = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
 
-  // State update status
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
-  // Từ điển trạng thái
   const statusLabels = {
       all: t('Tất cả', 'All'),
       pending: t('Chờ xử lý', 'Pending'),
@@ -88,7 +86,7 @@ const AdminOrders = () => {
     fetchOrders();
   }, [page, filterStatus]); 
 
-  // Tự động mở Modal nếu có orderId trên URL (Deep Link)
+  // Deep Link Auto Open
   useEffect(() => {
       if (urlOrderId) {
           const fetchDeepLinkOrder = async () => {
@@ -146,14 +144,14 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FIXED: Gửi Chuông + Email + Tele) ---
+  // --- HÀM UPDATE STATUS (ĐÃ SỬA: TIÊU ĐỀ TELEGRAM & QUYỀN GỬI) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE DB
+          // 1. UPDATE DB (Admin needs permission via RLS - See SQL below)
           const { error } = await supabase
               .from('orders')
               .update({ status: newStatus })
@@ -161,7 +159,7 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHUÔNG (Insert trực tiếp)
+          // 2. TẠO THÔNG BÁO CHO USER (QUAN TRỌNG: Cần SQL Admin Policy để chạy đc dòng này)
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               const statusText = statusLabels[newStatus] || newStatus;
@@ -169,7 +167,6 @@ const AdminOrders = () => {
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
                   : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
 
-              // Deep link: Trỏ về trang Cart kèm ID để mở modal
               const deepLink = `/cart?orderId=${selectedOrder.id}`;
 
               const { error: notifError } = await supabase.from('notifications').insert({
@@ -181,14 +178,14 @@ const AdminOrders = () => {
                   is_read: false
               });
               
-              if (notifError) console.error("Lỗi tạo thông báo (Check SQL Admin Policy):", notifError);
-              else console.log("Đã tạo thông báo chuông cho user:", selectedOrder.user_id);
+              if (notifError) console.error("Lỗi Notification (Cần chạy SQL Full):", notifError);
+              else console.log("Đã tạo thông báo chuông OK");
           }
 
-          // 3. GỬI TELEGRAM (Client-side)
+          // 3. GỬI TELEGRAM (Client-side Direct)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (Via Function - Kèm Token)
+          // 4. GỬI EMAIL (Via Function - Kèm Token Admin)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Update UI
@@ -204,6 +201,7 @@ const AdminOrders = () => {
       }
   };
 
+  // Sửa tiêu đề Tele theo yêu cầu
   const sendDirectTelegram = async (orderId, status) => {
       try {
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
@@ -212,7 +210,8 @@ const AdminOrders = () => {
 
           if (!botToken || !chatId) return;
 
-          const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
+          // SỬA Ở ĐÂY: Tiêu đề tiếng Anh chuẩn
+          const text = `📦 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
           await fetch(url, { mode: 'no-cors' });
@@ -223,20 +222,15 @@ const AdminOrders = () => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
-          
-          if (!token) {
-              console.warn("Không tìm thấy token Admin, không thể gửi email.");
-              return;
-          }
+          if (!token) return;
 
-          // URL Function 'send-order-email' của bạn
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
           
           fetch(FUNCTION_URL, {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}` 
+                  'Authorization': `Bearer ${token}`
               },
               body: JSON.stringify({ email, orderId, status, lang })
           }).catch(e => console.warn("Email func error:", e));
