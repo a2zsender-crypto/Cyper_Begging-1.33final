@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useLang } from '../../context/LangContext';
-import { useSearchParams } from 'react-router-dom'; // QUAN TRỌNG: Để bắt URL
+import { useSearchParams } from 'react-router-dom';
 
 // --- COMPONENT CON: HIỂN THỊ KEY BẢO MẬT ---
 const MaskedKeyDisplay = ({ text, t }) => {
@@ -63,15 +63,15 @@ const AdminOrders = () => {
   const [userRole, setUserRole] = useState('user'); 
   const ITEMS_PER_PAGE = 10;
 
-  // --- LOGIC DEEP LINKING (Ý tưởng của bạn) ---
+  // Deep Link Logic
   const [searchParams, setSearchParams] = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
 
-  // State cho việc update status
+  // State update status
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
-  // TỪ ĐIỂN TRẠNG THÁI
+  // Từ điển trạng thái
   const statusLabels = {
       all: t('Tất cả', 'All'),
       pending: t('Chờ xử lý', 'Pending'),
@@ -88,10 +88,9 @@ const AdminOrders = () => {
     fetchOrders();
   }, [page, filterStatus]); 
 
-  // --- EFFECT: TỰ ĐỘNG MỞ MODAL KHI CÓ ORDER ID TRÊN URL ---
+  // Tự động mở Modal nếu có orderId trên URL (Deep Link)
   useEffect(() => {
       if (urlOrderId) {
-          // Fetch riêng đơn hàng này (để đảm bảo có dữ liệu dù nó nằm ở trang khác)
           const fetchDeepLinkOrder = async () => {
               const { data, error } = await supabase
                   .from('orders')
@@ -108,7 +107,6 @@ const AdminOrders = () => {
       }
   }, [urlOrderId]);
 
-  // Khi đóng Modal thì xóa param trên URL để sạch sẽ
   const closeOrderModal = () => {
       setSelectedOrder(null);
       if (urlOrderId) {
@@ -148,14 +146,14 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FIXED: Link đúng & Email Auth) ---
+  // --- HÀM UPDATE STATUS (FIXED: Gửi Chuông + Email + Tele) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE TRỰC TIẾP VÀO DB
+          // 1. UPDATE DB
           const { error } = await supabase
               .from('orders')
               .update({ status: newStatus })
@@ -163,7 +161,7 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO (KÈM DEEP LINK)
+          // 2. TẠO THÔNG BÁO CHUÔNG (Insert trực tiếp)
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               const statusText = statusLabels[newStatus] || newStatus;
@@ -171,28 +169,29 @@ const AdminOrders = () => {
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
                   : `Order #${selectedOrder.id} has been changed to: ${statusText}`;
 
-              // --- ĐÂY LÀ PHẦN LINK THẲNG VÀO MODAL ---
-              // Giả sử trang quản lý là /admin (tab orders)
-              const deepLink = `/admin?tab=orders&orderId=${selectedOrder.id}`;
+              // Deep link: Trỏ về trang Cart kèm ID để mở modal
+              const deepLink = `/cart?orderId=${selectedOrder.id}`;
 
               const { error: notifError } = await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
-                  link: deepLink, 
+                  link: deepLink,
                   is_read: false
               });
-              if (notifError) console.error("Notification Error:", notifError);
+              
+              if (notifError) console.error("Lỗi tạo thông báo (Check SQL Admin Policy):", notifError);
+              else console.log("Đã tạo thông báo chuông cho user:", selectedOrder.user_id);
           }
 
           // 3. GỬI TELEGRAM (Client-side)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (FIXED: Có Token)
+          // 4. GỬI EMAIL (Via Function - Kèm Token)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
-          // 5. Cập nhật giao diện
+          // 5. Update UI
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
           setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: newStatus } : o));
           setSelectedOrder(prev => ({...prev, status: newStatus}));
@@ -220,22 +219,24 @@ const AdminOrders = () => {
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Hàm gửi Email (FIX: Thêm Token Authentication)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
           
-          // Dù user thường hay admin đều cần token để qua cửa Edge Function
-          if (!token) return;
+          if (!token) {
+              console.warn("Không tìm thấy token Admin, không thể gửi email.");
+              return;
+          }
 
+          // URL Function 'send-order-email' của bạn
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
           
           fetch(FUNCTION_URL, {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}` // QUAN TRỌNG NHẤT
+                  'Authorization': `Bearer ${token}` 
               },
               body: JSON.stringify({ email, orderId, status, lang })
           }).catch(e => console.warn("Email func error:", e));
