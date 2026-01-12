@@ -114,7 +114,7 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FIXED: Nội dung thông báo chuẩn yêu cầu) ---
+  // --- HÀM UPDATE STATUS (FIXED) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
@@ -130,12 +130,9 @@ const AdminOrders = () => {
           if (error) throw error;
 
           // 2. TẠO THÔNG BÁO CHO USER (Bell Notification)
-          // Lưu ý: Chỉ tạo nếu đơn hàng có gắn với tài khoản User
           if (selectedOrder.user_id) {
-              // Yêu cầu: "Order status updated" (Tiếng Anh)
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               
-              // Nội dung chi tiết
               const statusText = statusLabels[newStatus] || newStatus;
               const notifMsg = lang === 'vi' 
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
@@ -145,19 +142,18 @@ const AdminOrders = () => {
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
-                  type: 'order', // Dùng type này để định danh icon bên Layout
-                  link: `/cart`, // Link khi click vào thông báo
+                  type: 'order',
+                  link: `/cart`, // Link khi click
                   is_read: false
               });
               
-              if (notifError) console.error("Lỗi tạo thông báo:", notifError);
-              else console.log("Đã tạo thông báo cho user:", selectedOrder.user_id);
+              if (notifError) console.error("Lỗi tạo thông báo (Check SQL Policy):", notifError);
           }
 
           // 3. GỬI TELEGRAM (Client-side Direct Call)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL
+          // 4. GỬI EMAIL (FIXED: Đã thêm Token)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Cập nhật giao diện
@@ -173,7 +169,6 @@ const AdminOrders = () => {
       }
   };
 
-  // Hàm gửi Telegram trực tiếp
   const sendDirectTelegram = async (orderId, status) => {
       try {
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
@@ -189,20 +184,21 @@ const AdminOrders = () => {
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Hàm gửi Email qua Function (Đã fix Auth Header)
+  // FIX: Thêm Auth Header để gửi email qua Edge Function
   const sendEmailNotification = async (email, orderId, status) => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
           if (!token) return;
 
+          // Thay URL này bằng URL thật của function 'send-order-email'
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
           
           fetch(FUNCTION_URL, {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
+                  'Authorization': `Bearer ${token}` // QUAN TRỌNG
               },
               body: JSON.stringify({ email, orderId, status, lang })
           }).catch(e => console.warn("Email func error:", e));
