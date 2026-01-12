@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell } from 'lucide-react';
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -39,7 +39,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // LOGIC CHUÔNG (User & Admin) - FIXED REALTIME FILTER ISSUE
+  // LOGIC CHUÔNG (User & Admin)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -69,8 +69,7 @@ export default function Layout() {
       
       fetchNoti();
 
-      // LẮNG NGHE THÔNG BÁO MỚI (FIXED)
-      // Bỏ filter='user_id=eq...' vì nó hay lỗi kiểu dữ liệu. Lọc bằng JS bên trong.
+      // LẮNG NGHE THÔNG BÁO MỚI (Realtime)
       const channel = supabase.channel(`global-noti-${uid}`)
           .on('postgres_changes', 
               { event: 'INSERT', schema: 'public', table: 'notifications' }, 
@@ -90,6 +89,7 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
+  // Xử lý khi click vào 1 thông báo
   const handleReadNoti = async (noti) => {
       if (!noti.is_read) {
           setUnreadCount(prev => Math.max(0, prev - 1));
@@ -110,6 +110,21 @@ export default function Layout() {
              } catch(e) { console.error(e); }
           }
       }
+  };
+
+  // --- TÍNH NĂNG MỚI: ĐÁNH DẤU TẤT CẢ LÀ ĐÃ ĐỌC ---
+  const handleMarkAllRead = async () => {
+      if (notifications.length === 0 || unreadCount === 0) return;
+
+      // 1. Cập nhật UI ngay lập tức
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+
+      // 2. Cập nhật Database
+      await supabase.from('notifications')
+          .update({ is_read: true })
+          .eq('user_id', session.user.id)
+          .eq('is_read', false); // Chỉ update những cái chưa đọc cho nhẹ DB
   };
 
   const handleLogout = async () => { 
@@ -164,9 +179,22 @@ export default function Layout() {
                     </button>
                     {showNotiDropdown && (
                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-fade-in-up origin-top-right">
+                            {/* DROPDOWN HEADER */}
                             <div className="p-3 border-b bg-gray-50 font-bold text-sm text-gray-700 flex justify-between items-center">
                                 <span>{t('Thông báo', 'Notifications')}</span>
-                                <button onClick={()=>setShowNotiDropdown(false)}><X size={16}/></button>
+                                <div className="flex items-center gap-1">
+                                    {/* NÚT ĐÁNH DẤU TẤT CẢ ĐÃ ĐỌC */}
+                                    <button 
+                                        onClick={handleMarkAllRead} 
+                                        title={t("Đánh dấu tất cả đã đọc", "Mark all as read")}
+                                        className="p-1.5 hover:bg-blue-100 text-blue-600 rounded-lg transition"
+                                    >
+                                        <CheckCheck size={16}/>
+                                    </button>
+                                    <button onClick={()=>setShowNotiDropdown(false)} className="p-1.5 hover:bg-gray-200 rounded-lg transition text-gray-500">
+                                        <X size={16}/>
+                                    </button>
+                                </div>
                             </div>
                             <div className="max-h-80 overflow-y-auto">
                                 {notifications.length > 0 ? notifications.map(n => (
