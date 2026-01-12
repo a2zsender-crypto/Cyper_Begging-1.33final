@@ -114,7 +114,7 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (FIXED) ---
+  // --- HÀM UPDATE STATUS (FULL OPTION) ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
@@ -129,10 +129,10 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHO USER (Bell Notification)
+          // 2. TẠO THÔNG BÁO CHO USER (Chỉ nếu user_id tồn tại)
+          // Đã fix lỗi nhờ Policy SQL "Admins can insert notifications"
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
-              
               const statusText = statusLabels[newStatus] || newStatus;
               const notifMsg = lang === 'vi' 
                   ? `Đơn hàng #${selectedOrder.id} đã chuyển sang: ${statusText}`
@@ -143,17 +143,16 @@ const AdminOrders = () => {
                   title: notifTitle,
                   message: notifMsg,
                   type: 'order',
-                  link: `/cart`, // Link khi click
+                  link: `/cart`,
                   is_read: false
               });
-              
-              if (notifError) console.error("Lỗi tạo thông báo (Check SQL Policy):", notifError);
+              if (notifError) console.error("Notification Error:", notifError);
           }
 
-          // 3. GỬI TELEGRAM (Client-side Direct Call)
+          // 3. GỬI TELEGRAM (Client-side)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (FIXED: Đã thêm Token)
+          // 4. GỬI EMAIL (FIXED: Thêm Auth Token)
           sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Cập nhật giao diện
@@ -184,21 +183,20 @@ const AdminOrders = () => {
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // FIX: Thêm Auth Header để gửi email qua Edge Function
+  // Hàm gửi Email qua Function (Đã fix Auth Header)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
           if (!token) return;
 
-          // Thay URL này bằng URL thật của function 'send-order-email'
           const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
           
           fetch(FUNCTION_URL, {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}` // QUAN TRỌNG
+                  'Authorization': `Bearer ${token}`
               },
               body: JSON.stringify({ email, orderId, status, lang })
           }).catch(e => console.warn("Email func error:", e));
