@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../supabaseClient';
 import { 
   Search, Eye, EyeOff, Filter, ChevronLeft, ChevronRight, 
-  Clock, CheckCircle, XCircle, AlertTriangle, Package, Key, Copy, X, Save
+  Clock, CheckCircle, XCircle, AlertTriangle, Package, Key, Copy, X, Save, MapPin
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { useLang } from '../../context/LangContext';
@@ -59,12 +59,24 @@ const AdminOrders = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
-  const [userRole, setUserRole] = useState('user'); // State check quyền
+  const [userRole, setUserRole] = useState('user'); 
   const ITEMS_PER_PAGE = 10;
 
   // State cho việc update status
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
+
+  // --- FIX: TỪ ĐIỂN TRẠNG THÁI ---
+  const statusLabels = {
+      all: t('Tất cả', 'All'),
+      pending: t('Chờ xử lý', 'Pending'),
+      paid: t('Đã thanh toán', 'Paid'),
+      shipping: t('Đang vận chuyển', 'Shipping'),
+      completed: t('Hoàn thành', 'Completed'),
+      cancelled: t('Đã hủy', 'Cancelled'),
+      expired: t('Hết hạn', 'Expired'),
+      failed: t('Thất bại', 'Failed')
+  };
 
   useEffect(() => {
     checkUserRole();
@@ -104,7 +116,7 @@ const AdminOrders = () => {
 
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
-      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành ${newStatus}?`, `Confirm update status to ${newStatus}?`))) return;
+      if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
@@ -120,7 +132,6 @@ const AdminOrders = () => {
           if (data?.error) throw new Error(data.error);
 
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
-          // Refresh data
           fetchOrders();
           setSelectedOrder(prev => ({...prev, status: newStatus}));
       } catch (err) {
@@ -141,11 +152,13 @@ const AdminOrders = () => {
       completed: 'bg-green-100 text-green-800 border-green-200',
       expired: 'bg-gray-100 text-gray-800 border-gray-200',
       failed: 'bg-red-100 text-red-800 border-red-200',
-      shipping: 'bg-purple-100 text-purple-800 border-purple-200'
+      shipping: 'bg-purple-100 text-purple-800 border-purple-200',
+      cancelled: 'bg-red-100 text-red-800 border-red-200'
     };
     return (
       <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.expired}`}>
-        <span className="capitalize">{status}</span>
+        {/* FIX: HIỂN THỊ TEXT DỊCH */}
+        <span className="capitalize">{statusLabels[status] || status}</span>
       </span>
     );
   };
@@ -154,7 +167,6 @@ const AdminOrders = () => {
     <div className="bg-white rounded-xl shadow-sm border border-slate-200">
       <div className="p-6 border-b border-slate-100">
         <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
-          {/* FIX C1: TIÊU ĐỀ ĐA NGÔN NGỮ */}
           <h2 className="text-xl font-bold text-slate-800">{t('Quản lý Đơn hàng', 'Order Management')}</h2>
           <div className="flex gap-2">
             <button onClick={fetchOrders} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
@@ -183,7 +195,8 @@ const AdminOrders = () => {
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors border
                   ${filterStatus === status ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
               >
-                {status === 'all' ? t('Tất cả', 'All') : status}
+                {/* FIX: HIỂN THỊ TEXT DỊCH CHO NÚT LỌC */}
+                {statusLabels[status] || status}
               </button>
             ))}
           </div>
@@ -244,7 +257,7 @@ const AdminOrders = () => {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-8">
-              {/* FIX C2: CẬP NHẬT TRẠNG THÁI (Chỉ hiện với ADMIN) */}
+              {/* FIX: CẬP NHẬT TRẠNG THÁI VỚI TEXT DỊCH */}
               {userRole === 'admin' && (
                   <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div className="flex items-center gap-2">
@@ -260,11 +273,11 @@ const AdminOrders = () => {
                               onChange={(e) => setNewStatus(e.target.value)}
                               className="border border-indigo-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           >
-                              <option value="pending">Pending</option>
-                              <option value="paid">Paid</option>
-                              <option value="shipping">Shipping</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
+                              <option value="pending">{statusLabels['pending']}</option>
+                              <option value="paid">{statusLabels['paid']}</option>
+                              <option value="shipping">{statusLabels['shipping']}</option>
+                              <option value="completed">{statusLabels['completed']}</option>
+                              <option value="cancelled">{statusLabels['cancelled']}</option>
                           </select>
                           <button 
                               onClick={handleUpdateStatus} 
@@ -278,14 +291,41 @@ const AdminOrders = () => {
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* --- CỘT 1: THÔNG TIN KHÁCH HÀNG & SHIP --- */}
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                   <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Filter size={16}/> {t('Thông tin khách hàng', 'Customer Info')}</h4>
                   <div className="space-y-2 text-sm">
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Email:', 'Email:')}</span> {selectedOrder.customer_email}</p>
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name || 'N/A'}</p>
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
+                    
+                    {/* HIỂN THỊ ĐỊA CHỈ SHIP (Nếu có sản phẩm vật lý) */}
+                    {(() => {
+                        const hasPhysical = selectedOrder.order_items?.some(i => i.products?.is_digital === false);
+                        if (hasPhysical && selectedOrder.shipping_address) {
+                            return (
+                                <div className="mt-3 pt-3 border-t border-blue-200 text-sm">
+                                    <div className="font-bold text-blue-800 mb-1 flex items-center gap-2">
+                                        <MapPin size={14}/> {t('Địa chỉ nhận hàng', 'Shipping Address')}
+                                    </div>
+                                    <div className="pl-6 text-slate-700 whitespace-pre-line mb-1">
+                                        {selectedOrder.shipping_address}
+                                    </div>
+                                    {selectedOrder.phone_number && (
+                                        <div className="pl-6 text-slate-700">
+                                            <span className="font-medium text-blue-600">{t('SĐT:', 'Phone:')}</span> {selectedOrder.phone_number}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
+
                   </div>
                 </div>
+
+                {/* --- CỘT 2: THÔNG TIN THANH TOÁN --- */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                   <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Package size={16}/> {t('Thông tin thanh toán', 'Payment Info')}</h4>
                   <div className="space-y-2 text-sm">
@@ -311,7 +351,6 @@ const AdminOrders = () => {
                       {selectedOrder.order_items?.map((item, idx) => {
                         const displayName = item.product_name || item.products?.title || 'Unknown Product';
                         const variantInfo = item.variant_name; 
-                        // Kiểm tra nếu là Digital
                         const isDigital = item.products?.is_digital;
 
                         return (
@@ -321,11 +360,9 @@ const AdminOrders = () => {
                                 <div className="font-medium text-slate-900 text-base">{displayName}</div>
                                 {variantInfo && <div className="text-xs text-slate-500 bg-slate-100 w-fit px-2 py-0.5 rounded">{variantInfo}</div>}
                                 
-                                {/* HIỂN THỊ KEY */}
                                 {item.assigned_key ? (
                                     <MaskedKeyDisplay text={item.assigned_key} t={t} />
                                 ) : (
-                                    // FIX C3: CHỈ HIỆN CẢNH BÁO VỚI SẢN PHẨM DIGITAL
                                     isDigital && (selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && (
                                         <div className="text-xs text-amber-600 flex items-center gap-1 mt-1 font-medium bg-amber-50 w-fit px-2 py-1 rounded">
                                             <AlertTriangle size={12}/> {t('Đang chờ xử lý key...', 'Processing key...')}
