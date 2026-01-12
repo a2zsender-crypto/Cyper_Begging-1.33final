@@ -13,18 +13,16 @@ export default function Layout() {
   const { lang, setLang, t } = useLang();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
-  // Realtime States
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotiDropdown, setShowNotiDropdown] = useState(false);
   const [session, setSession] = useState(null);
-  
-  // State phân quyền (Mới thêm)
   const [role, setRole] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Settings
   const { data: settings = {} } = useQuery({
     queryKey: ['site-settings'],
     queryFn: async () => {
@@ -36,7 +34,7 @@ export default function Layout() {
     staleTime: 1000 * 60 * 10
   });
 
-  // Hàm lấy role (Mới thêm)
+  // Lấy role
   const fetchRole = async (uid) => {
     const { data } = await supabase.from('profiles').select('role').eq('id', uid).single();
     if (data) setRole(data.role);
@@ -44,18 +42,18 @@ export default function Layout() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { 
-        setSession(session);
+        setSession(session); 
         if (session?.user) fetchRole(session.user.id);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { 
-        setSession(session);
+        setSession(session); 
         if (session?.user) fetchRole(session.user.id);
         else setRole(null);
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  // LOGIC CHUÔNG (User & Admin)
+  // Notifications Logic
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -63,84 +61,40 @@ export default function Layout() {
           return;
       }
       const uid = session.user.id;
-
       const fetchNoti = async () => {
-          // 1. Lấy danh sách hiển thị
-          const { data } = await supabase.from('notifications')
-              .select('*')
-              .eq('user_id', uid)
-              .order('created_at', {ascending: false})
-              .limit(15);
-          
+          const { data } = await supabase.from('notifications').select('*').eq('user_id', uid).order('created_at', {ascending: false}).limit(15);
           if (data) setNotifications(data);
-
-          // 2. Lấy số lượng chưa đọc
-          const { count } = await supabase.from('notifications')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', uid)
-              .eq('is_read', false);
-          
+          const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', uid).eq('is_read', false);
           setUnreadCount(count || 0);
       };
-      
       fetchNoti();
-
-      // LẮNG NGHE THÔNG BÁO MỚI (Realtime)
       const channel = supabase.channel(`global-noti-${uid}`)
-          .on('postgres_changes', 
-              { event: 'INSERT', schema: 'public', table: 'notifications' }, 
-              (payload) => {
-                  // Chỉ nhận thông báo của chính mình
-                  if (payload.new.user_id === uid) {
-                      setNotifications(prev => [payload.new, ...prev]);
-                      setUnreadCount(prev => prev + 1);
-                      toast.info(`🔔 ${payload.new.title}`);
-                  }
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
+              if (payload.new.user_id === uid) {
+                  setNotifications(prev => [payload.new, ...prev]);
+                  setUnreadCount(prev => prev + 1);
+                  toast.info(`🔔 ${payload.new.title}`);
               }
-          )
+          })
           .subscribe();
-
       return () => { supabase.removeChannel(channel); };
   }, [session]);
 
-  useEffect(() => setIsMenuOpen(false), [location]);
-
-  // Xử lý khi click vào 1 thông báo
   const handleReadNoti = async (noti) => {
       if (!noti.is_read) {
           setUnreadCount(prev => Math.max(0, prev - 1));
           setNotifications(prev => prev.map(n => n.id === noti.id ? { ...n, is_read: true } : n));
           await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
       }
-      
       setShowNotiDropdown(false);
-
-      if (noti.link) {
-          navigate(noti.link); 
-          if (noti.link.includes('ticketId=')) {
-             try {
-                 const ticketId = noti.link.split('ticketId=')[1];
-                 setTimeout(() => {
-                     window.dispatchEvent(new CustomEvent('FORCE_OPEN_TICKET', { detail: ticketId }));
-                 }, 500); 
-             } catch(e) { console.error(e); }
-          }
-      }
+      if (noti.link) navigate(noti.link);
   };
 
-  // --- TÍNH NĂNG MỚI: ĐÁNH DẤU TẤT CẢ LÀ ĐÃ ĐỌC ---
   const handleMarkAllRead = async () => {
       if (notifications.length === 0 || unreadCount === 0) return;
-
-      // 1. Cập nhật UI ngay lập tức
       setUnreadCount(0);
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-
-      // 2. Cập nhật Database
-      await supabase.from('notifications')
-          .update({ is_read: true })
-          .eq('user_id', session.user.id)
-          .eq('is_read', false); 
+      await supabase.from('notifications').update({ is_read: true }).eq('user_id', session.user.id).eq('is_read', false); 
   };
 
   const handleLogout = async () => { 
@@ -148,6 +102,11 @@ export default function Layout() {
       localStorage.clear(); 
       navigate('/login'); 
   };
+
+  // QUAN TRỌNG: Đường dẫn đích khi bấm vào icon user
+  // Nếu là Admin/Mod -> /admin
+  // Nếu là User -> /support (Vì đây là nơi xem lịch sử ticket trong code hiện tại)
+  const accountLink = (role === 'admin' || role === 'mod') ? '/admin' : '/support';
 
   return (
     <div className="flex flex-col min-h-screen font-sans bg-slate-50 text-slate-800">
@@ -195,21 +154,11 @@ export default function Layout() {
                     </button>
                     {showNotiDropdown && (
                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-fade-in-up origin-top-right">
-                            {/* DROPDOWN HEADER */}
                             <div className="p-3 border-b bg-gray-50 font-bold text-sm text-gray-700 flex justify-between items-center">
                                 <span>{t('Thông báo', 'Notifications')}</span>
                                 <div className="flex items-center gap-1">
-                                    {/* NÚT ĐÁNH DẤU TẤT CẢ ĐÃ ĐỌC */}
-                                    <button 
-                                        onClick={handleMarkAllRead} 
-                                        title={t("Đánh dấu tất cả đã đọc", "Mark all as read")}
-                                        className="p-1.5 hover:bg-blue-100 text-blue-600 rounded-lg transition"
-                                    >
-                                        <CheckCheck size={16}/>
-                                    </button>
-                                    <button onClick={()=>setShowNotiDropdown(false)} className="p-1.5 hover:bg-gray-200 rounded-lg transition text-gray-500">
-                                        <X size={16}/>
-                                    </button>
+                                    <button onClick={handleMarkAllRead} className="p-1.5 hover:bg-blue-100 text-blue-600 rounded-lg transition"><CheckCheck size={16}/></button>
+                                    <button onClick={()=>setShowNotiDropdown(false)} className="p-1.5 hover:bg-gray-200 rounded-lg transition text-gray-500"><X size={16}/></button>
                                 </div>
                             </div>
                             <div className="max-h-80 overflow-y-auto">
@@ -236,42 +185,41 @@ export default function Layout() {
               {cart.length > 0 && <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">{cart.length}</span>}
             </Link>
 
-            <div className="group relative hidden md:block">
-                {/* LOGIC NÚT USER MỚI */}
-                <Link 
-                    to={(role === 'admin' || role === 'mod') ? '/admin' : '/support'} 
-                    className="hover:text-blue-600 block py-2"
-                >
-                    <User size={22} />
-                </Link>
-                
-                <div className="absolute right-0 top-full pt-2 w-56 hidden group-hover:block z-50">
-                    <div className="bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
-                        
-                        {/* MENU DỰA TRÊN ROLE */}
-                        {(role === 'admin' || role === 'mod') ? (
-                            // MENU ADMIN/MOD
-                            <>
-                                <Link to="/admin" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
-                                    <Shield size={16}/> {t('Admin Panel', 'Admin Panel')}
-                                </Link>
-                            </>
-                        ) : (
-                            // MENU USER THƯỜNG
-                            <>
-                                <Link to="/support" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
-                                    <User size={16}/> {t('Tài khoản', 'My Account')}
-                                </Link>
-                            </>
-                        )}
+            {/* USER MENU LOGIC */}
+            {session ? (
+                <div className="group relative hidden md:block">
+                    {/* CLICK VÀO ICON -> ĐI THẲNG TRANG ĐÍCH */}
+                    <Link to={accountLink} className="hover:text-blue-600 block py-2">
+                        {(role === 'admin' || role === 'mod') ? <Shield size={22} /> : <User size={22} />}
+                    </Link>
 
-                        <div className="border-t border-gray-100"></div>
-                        <button onClick={handleLogout} className="flex w-full items-center gap-3 px-4 py-3 hover:bg-red-50 text-sm font-medium text-red-600 transition text-left">
-                            <LogOut size={16}/> {t('Đăng xuất', 'Logout')}
-                        </button>
+                    {/* HOVER MENU */}
+                    <div className="absolute right-0 top-full pt-2 w-56 hidden group-hover:block z-50">
+                        <div className="bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+                            
+                            {/* DÒNG 1: TRANG ĐÍCH */}
+                            <Link to={accountLink} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
+                                {(role === 'admin' || role === 'mod') ? (
+                                    <><Shield size={16}/> {t('Admin Panel', 'Admin Panel')}</>
+                                ) : (
+                                    <><User size={16}/> {t('Tài khoản', 'My Account')}</>
+                                )}
+                            </Link>
+
+                            <div className="border-t border-gray-100"></div>
+                            
+                            {/* DÒNG 2: LOGOUT */}
+                            <button onClick={handleLogout} className="flex w-full items-center gap-3 px-4 py-3 hover:bg-red-50 text-sm font-medium text-red-600 transition text-left">
+                                <LogOut size={16}/> {t('Đăng xuất', 'Logout')}
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            ) : (
+                <Link to="/login" className="hidden md:block">
+                    <User size={22} className="hover:text-blue-600 text-slate-600 transition"/>
+                </Link>
+            )}
           </div>
         </div>
 
@@ -283,11 +231,20 @@ export default function Layout() {
                     <Link to="/support" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Hỗ trợ', 'Support')} <ChevronRight size={16}/></Link>
                     <Link to="/contact" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Liên hệ', 'Contact')} <ChevronRight size={16}/></Link>
                     
-                    {/* MOBILE MENU */}
-                    {(role === 'admin' || role === 'mod') ? (
-                         <Link to="/admin" className="flex justify-between items-center py-2 hover:text-blue-600">{t('Admin Panel', 'Admin Panel')} <Shield size={16}/></Link>
+                    {session ? (
+                        <>
+                            <Link to={accountLink} onClick={()=>setIsMenuOpen(false)} className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600 text-blue-700 font-bold">
+                                {(role === 'admin' || role === 'mod') ? t('Quản trị viên', 'Admin Panel') : t('Tài khoản', 'My Account')}
+                                {(role === 'admin' || role === 'mod') ? <Shield size={16}/> : <User size={16}/>}
+                            </Link>
+                            <button onClick={() => { handleLogout(); setIsMenuOpen(false); }} className="flex w-full justify-between items-center py-2 text-red-600 font-medium">
+                                {t('Đăng xuất', 'Logout')} <LogOut size={16}/>
+                            </button>
+                        </>
                     ) : (
-                         <Link to="/support" className="flex justify-between items-center py-2 hover:text-blue-600">{t('Tài khoản', 'Account')} <User size={16}/></Link>
+                        <Link to="/login" onClick={()=>setIsMenuOpen(false)} className="flex justify-between items-center py-2 text-blue-600 font-bold">
+                            {t('Đăng nhập', 'Login')} <User size={16}/>
+                        </Link>
                     )}
                 </div>
             </div>
