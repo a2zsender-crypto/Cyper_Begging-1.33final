@@ -174,7 +174,7 @@ const AdminOrders = () => {
 
           if (!botToken || !chatId) return;
 
-          const text = `👮 <b>ADMIN UPDATE</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
+          const text = `👮 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
           await fetch(url, { mode: 'no-cors' });
