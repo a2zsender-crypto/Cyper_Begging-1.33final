@@ -2,16 +2,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { toast } from 'react-toastify';
-import { Save, ArrowLeft, Plus, Trash2, Upload, Zap, AlertCircle } from 'lucide-react';
+import { Save, ArrowLeft, Plus, Trash2, Upload, Zap, AlertCircle, Layers } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 
-// Hàm helper tạo mã SKU tự động (Slug)
+// Hàm helper tạo mã SKU tự động
 const generateSlug = (text) => {
   if (!text) return '';
-  return text
-    .toString()
-    .toLowerCase()
-    .trim()
+  return text.toString().toLowerCase().trim()
     .replace(/[àáạảãâầấậẩẫăằắặẳẵ]/g, "a")
     .replace(/[èéẹẻẽêềếệểễ]/g, "e")
     .replace(/[ìíịỉĩ]/g, "i")
@@ -37,43 +34,39 @@ export default function ProductDetail() {
     price: 0,
     category: 'Voucher',
     is_digital: true,
-    allow_api_restock: false, // Cột mới trong DB
+    allow_api_restock: false, 
     images: [],
-    variants: [] // Cấu trúc JSON gốc: [{"name": "value", "options": [...]}]
+    variants: [] // Cấu trúc: [{ name: "Mệnh giá", options: [{label: "10k", code: "VTT10", ...}] }]
   });
-
-  // State tạm để hứng dữ liệu biến thể hiển thị lên UI
-  const [uiVariants, setUiVariants] = useState([]);
 
   useEffect(() => {
     if (isEdit) fetchProduct();
   }, [id]);
 
   const fetchProduct = async () => {
-    // Rà soát cấu trúc bảng: Lấy allow_api_restock nếu có
     const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
     if (error) { toast.error(t('Lỗi tải sản phẩm', 'Error loading product')); return; }
     
-    // Gán dữ liệu vào state
+    // Đảm bảo variants luôn là mảng
+    let loadedVariants = data.variants;
+    if (!Array.isArray(loadedVariants)) loadedVariants = [];
+
+    // Map dữ liệu để đảm bảo các trường mới (code) tồn tại
+    const cleanedVariants = loadedVariants.map(group => ({
+        ...group,
+        options: Array.isArray(group.options) ? group.options.map(opt => ({
+            ...opt,
+            label: opt.label || opt.value || '', // Ưu tiên label
+            code: opt.code || '', // Load code cũ hoặc để trống
+            price_mod: opt.price_mod || 0
+        })) : []
+    }));
+
     setProduct({
         ...data,
-        allow_api_restock: data.allow_api_restock === true // Đảm bảo boolean
+        allow_api_restock: data.allow_api_restock === true,
+        variants: cleanedVariants
     });
-
-    // --- LOGIC QUAN TRỌNG: MAP DỮ LIỆU CŨ LÊN GIAO DIỆN ---
-    // Cấu trúc DB: variants = [ { "name": "value", "options": [ { "label": "10k", "price_mod": 0, ... } ] } ]
-    if (data.variants && Array.isArray(data.variants) && data.variants.length > 0) {
-        const group = data.variants[0]; // Lấy nhóm đầu tiên
-        if (group && group.options && Array.isArray(group.options)) {
-            const mapped = group.options.map(opt => ({
-                name: opt.label || opt.value, // Lấy tên hiển thị (ưu tiên label)
-                // Lấy code cũ nếu có, nếu không thì lấy value, hoặc generate
-                code: opt.code || opt.value || generateSlug(opt.label).toUpperCase(),
-                price: opt.price_mod || 0
-            }));
-            setUiVariants(mapped);
-        }
-    }
   };
 
   const handleImageUpload = async (e) => {
@@ -86,64 +79,79 @@ export default function ProductDetail() {
       setProduct({ ...product, images: [...(product.images||[]), data.publicUrl] });
   };
 
-  // --- THAO TÁC TRÊN UI VARIANTS ---
-  const addVariant = () => {
-      setUiVariants([...uiVariants, { name: '', code: '', price: 0 }]);
+  // --- QUẢN LÝ NHÓM BIẾN THỂ (Variant Groups) ---
+  const addVariantGroup = () => {
+      setProduct({
+          ...product,
+          variants: [...product.variants, { name: 'Phân loại', options: [] }]
+      });
   };
 
-  const removeVariant = (index) => {
-      const newVars = [...uiVariants];
-      newVars.splice(index, 1);
-      setUiVariants(newVars);
+  const removeVariantGroup = (idx) => {
+      const newVars = [...product.variants];
+      newVars.splice(idx, 1);
+      setProduct({ ...product, variants: newVars });
   };
 
-  const updateVariant = (index, field, value) => {
-      const newVars = [...uiVariants];
-      newVars[index][field] = value;
+  const updateGroupName = (idx, val) => {
+      const newVars = [...product.variants];
+      newVars[idx].name = val;
+      setProduct({ ...product, variants: newVars });
+  };
 
-      // Logic sinh mã tự động:
-      // Chỉ sinh mã khi đang nhập Tên VÀ (Mã đang trống HOẶC chưa bật chế độ API)
-      if (field === 'name') {
-           const currentCode = newVars[index].code;
+  // --- QUẢN LÝ TÙY CHỌN (Options) ---
+  const addOption = (groupIdx) => {
+      const newVars = [...product.variants];
+      newVars[groupIdx].options.push({ label: '', code: '', price_mod: 0 });
+      setProduct({ ...product, variants: newVars });
+  };
+
+  const removeOption = (groupIdx, optIdx) => {
+      const newVars = [...product.variants];
+      newVars[groupIdx].options.splice(optIdx, 1);
+      setProduct({ ...product, variants: newVars });
+  };
+
+  const updateOption = (groupIdx, optIdx, field, val) => {
+      const newVars = [...product.variants];
+      newVars[groupIdx].options[optIdx][field] = val;
+
+      // Logic sinh mã tự động (chỉ khi đang nhập Label và chưa có Code hoặc chưa bật API)
+      if (field === 'label') {
+           const currentCode = newVars[groupIdx].options[optIdx].code;
            if (!currentCode || !product.allow_api_restock) {
-                newVars[index].code = generateSlug(value).toUpperCase();
+                newVars[groupIdx].options[optIdx].code = generateSlug(val).toUpperCase();
            }
       }
-      setUiVariants(newVars);
+      setProduct({ ...product, variants: newVars });
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
     setLoading(true);
 
-    // --- KHÔI PHỤC CẤU TRÚC JSON GỐC ĐỂ LƯU DB ---
-    let finalVariants = [];
-    
-    if (uiVariants.length > 0) {
-        finalVariants = [{
-            "name": "value", // Giữ nguyên key "value" để khớp logic Frontend cũ
-            "options": uiVariants.map(v => ({
-                "label": v.name,      // Tên hiển thị (VN)
-                "label_en": v.name,   // Tên hiển thị (EN) - tạm để giống VN
-                "value": v.name,      // Cần thiết cho logic khớp kho cũ (product_keys.variant_info.value)
-                "price_mod": Number(v.price),
-                "image": "",          // Giữ structure cũ
-                "code": v.code || generateSlug(v.name).toUpperCase() // Cột mới thêm để phục vụ API
-            }))
-        }];
-    }
+    // Chuẩn hóa dữ liệu trước khi lưu
+    const finalVariants = product.variants.map(group => ({
+        name: group.name || 'Phân loại',
+        options: group.options.map(opt => ({
+            label: opt.label,
+            label_en: opt.label, // Sync EN
+            value: opt.label,    // QUAN TRỌNG: Sync value = label để khớp bảng product_keys cũ
+            price_mod: Number(opt.price_mod),
+            code: opt.code || generateSlug(opt.label).toUpperCase(), // Đảm bảo luôn có SKU
+            image: opt.image || ''
+        }))
+    }));
 
     const payload = { 
         ...product, 
         variants: finalVariants,
-        // Đảm bảo gửi đúng boolean cho cột allow_api_restock
         allow_api_restock: product.allow_api_restock 
     };
     
-    // Loại bỏ các trường không tồn tại trong bảng products (tránh lỗi cột ảo)
     delete payload.id; 
     delete payload.created_at;
-    delete payload.variants_config; // Xóa cột rác nếu lỡ có từ code cũ
+    delete payload.variants_config; // Xóa cột rác nếu có
 
     let error;
     if (isEdit) {
@@ -153,10 +161,9 @@ export default function ProductDetail() {
     }
 
     setLoading(false);
-    if (error) {
-        toast.error("Database Error: " + error.message);
-    } else {
-        toast.success(t("Đã lưu sản phẩm thành công!", "Product Saved Successfully!"));
+    if (error) toast.error("Database Error: " + error.message);
+    else {
+        toast.success(t("Đã lưu sản phẩm!", "Product Saved!"));
         navigate('/admin/products');
     }
   };
@@ -173,7 +180,7 @@ export default function ProductDetail() {
         </div>
 
         <form onSubmit={handleSave} className="grid grid-cols-3 gap-8">
-            {/* Cột trái: Thông tin chính */}
+            {/* CỘT TRÁI: THÔNG TIN CHÍNH */}
             <div className="col-span-2 space-y-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                     <h3 className="font-bold text-slate-700 border-b pb-2">{t('Thông tin chung', 'General Info')}</h3>
@@ -189,6 +196,7 @@ export default function ProductDetail() {
                             value={product.description} onChange={e=>setProduct({...product, description: e.target.value})}
                         />
                     </div>
+                    
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-600 mb-1">{t('Danh mục', 'Category')}</label>
@@ -210,7 +218,7 @@ export default function ProductDetail() {
                         </div>
                     </div>
 
-                    {/* Checkbox API Restock */}
+                    {/* CHECKBOX API */}
                     {product.is_digital && (
                         <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3 mt-2">
                              <input 
@@ -234,7 +242,7 @@ export default function ProductDetail() {
                             </div>
                         </div>
                     )}
-
+                    
                     <div>
                         <label className="block text-sm font-medium text-slate-600 mb-1">{t('Giá mặc định (VNĐ)', 'Default Price (VND)')}</label>
                         <input type="number" className="w-full border p-2 rounded-lg font-mono"
@@ -243,98 +251,97 @@ export default function ProductDetail() {
                     </div>
                 </div>
 
-                {/* Phần cấu hình biến thể */}
+                {/* KHU VỰC QUẢN LÝ BIẾN THỂ (NESTED STRUCTURE) */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                     <div className="flex justify-between items-center border-b pb-2">
                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                            {t('Cấu hình biến thể', 'Variants Config')}
+                            <Layers size={18}/> {t('Các nhóm biến thể', 'Variant Groups')}
                         </h3>
-                        <button type="button" onClick={addVariant} className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-100 flex items-center gap-1 font-medium transition">
-                            <Plus size={16}/> {t('Thêm dòng', 'Add Row')}
+                        <button type="button" onClick={addVariantGroup} className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-100 flex items-center gap-1 font-medium">
+                            <Plus size={16}/> {t('Thêm nhóm', 'Add Group')}
                         </button>
                     </div>
-
-                    {uiVariants.length === 0 ? (
-                        <p className="text-sm text-slate-400 italic text-center py-4">
-                            {t('Sản phẩm này chưa có biến thể (Bán theo giá gốc).', 'No variants configured.')}
+                    
+                    {product.variants.length === 0 ? (
+                        <p className="text-sm text-slate-400 italic text-center py-6 border-2 border-dashed rounded-lg">
+                            {t('Chưa có biến thể nào.', 'No variants added.')}
                         </p>
                     ) : (
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-12 gap-2 text-xs font-bold text-slate-500 uppercase bg-slate-50 p-2 rounded">
-                                <div className="col-span-5">{t('Tên hiển thị (Label)', 'Label')}</div>
-                                <div className="col-span-4 flex items-center gap-1">
-                                    {t('Mã SKU / API Code', 'SKU')}
-                                    {product.allow_api_restock && <Zap size={12} className="text-indigo-600"/>}
+                        product.variants.map((group, gIdx) => (
+                            <div key={gIdx} className="border rounded-xl p-4 bg-slate-50 mb-4">
+                                <div className="flex justify-between items-center mb-3">
+                                    <input 
+                                        className="font-bold text-slate-700 bg-transparent border-b border-slate-300 focus:border-blue-500 outline-none w-1/2"
+                                        value={group.name}
+                                        placeholder="Tên nhóm (VD: Mệnh giá)"
+                                        onChange={e => updateGroupName(gIdx, e.target.value)}
+                                    />
+                                    <button type="button" onClick={() => removeVariantGroup(gIdx)} className="text-red-400 hover:text-red-600 text-xs uppercase font-bold">
+                                        {t('Xóa nhóm', 'Remove Group')}
+                                    </button>
                                 </div>
-                                <div className="col-span-2">{t('Giá riêng', 'Price')}</div>
-                                <div className="col-span-1"></div>
-                            </div>
-                            {uiVariants.map((v, idx) => (
-                                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                                    {/* Tên hiển thị */}
-                                    <div className="col-span-5">
-                                        <input 
-                                            placeholder="VD: 50k, 123..."
-                                            className="w-full border p-2 rounded focus:border-blue-500 outline-none"
-                                            value={v.name}
-                                            onChange={e => updateVariant(idx, 'name', e.target.value)}
-                                        />
+
+                                {/* BẢNG OPTIONS */}
+                                <div className="space-y-2">
+                                    <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase px-2">
+                                        <div className="col-span-4">Tên hiển thị</div>
+                                        <div className="col-span-4 flex items-center gap-1">
+                                            Mã SKU {product.allow_api_restock && <Zap size={10} className="text-indigo-600"/>}
+                                        </div>
+                                        <div className="col-span-3">Giá (+/-)</div>
+                                        <div className="col-span-1"></div>
                                     </div>
+
+                                    {group.options.map((opt, oIdx) => (
+                                        <div key={oIdx} className="grid grid-cols-12 gap-2 items-center">
+                                            <div className="col-span-4">
+                                                <input 
+                                                    className="w-full border p-1.5 rounded text-sm outline-none focus:border-blue-500"
+                                                    placeholder="VD: 50k"
+                                                    value={opt.label}
+                                                    onChange={e => updateOption(gIdx, oIdx, 'label', e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="col-span-4">
+                                                <input 
+                                                    readOnly={!product.allow_api_restock}
+                                                    className={`w-full border p-1.5 rounded text-sm font-mono outline-none 
+                                                        ${product.allow_api_restock 
+                                                            ? 'bg-white border-indigo-300 text-indigo-700 font-bold' 
+                                                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                                                    placeholder="AUTO"
+                                                    value={opt.code}
+                                                    onChange={e => updateOption(gIdx, oIdx, 'code', e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="col-span-3">
+                                                <input 
+                                                    type="number"
+                                                    className="w-full border p-1.5 rounded text-sm text-right outline-none focus:border-blue-500"
+                                                    placeholder="0"
+                                                    value={opt.price_mod}
+                                                    onChange={e => updateOption(gIdx, oIdx, 'price_mod', e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="col-span-1 text-center">
+                                                <button type="button" onClick={() => removeOption(gIdx, oIdx)} className="text-slate-400 hover:text-red-500">
+                                                    <Trash2 size={16}/>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
                                     
-                                    {/* Mã SKU - Logic Disable/Enable */}
-                                    <div className="col-span-4 relative">
-                                        <input 
-                                            // Nếu cho phép API -> Cho sửa thoải mái. Nếu không -> Readonly và màu xám
-                                            readOnly={!product.allow_api_restock}
-                                            placeholder="Auto Generated"
-                                            className={`w-full border p-2 rounded font-mono text-sm outline-none transition-colors
-                                                ${product.allow_api_restock 
-                                                    ? 'bg-white border-indigo-300 focus:border-indigo-500 text-indigo-700 font-bold' 
-                                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                                }
-                                            `}
-                                            value={v.code}
-                                            onChange={e => updateVariant(idx, 'code', e.target.value)}
-                                        />
-                                    </div>
-
-                                    {/* Giá tiền */}
-                                    <div className="col-span-2">
-                                        <input 
-                                            type="number"
-                                            placeholder="0"
-                                            className="w-full border p-2 rounded text-right focus:border-blue-500 outline-none"
-                                            value={v.price}
-                                            onChange={e => updateVariant(idx, 'price', Number(e.target.value))}
-                                        />
-                                    </div>
-
-                                    {/* Nút xóa */}
-                                    <div className="col-span-1 text-center">
-                                        <button type="button" onClick={() => removeVariant(idx)} className="text-red-400 hover:text-red-600 transition">
-                                            <Trash2 size={18}/>
-                                        </button>
-                                    </div>
+                                    <button type="button" onClick={() => addOption(gIdx)} className="text-xs text-blue-600 font-bold hover:underline mt-2 flex items-center gap-1">
+                                        <Plus size={12}/> {t('Thêm tùy chọn', 'Add Option')}
+                                    </button>
                                 </div>
-                            ))}
-                        </div>
-                    )}
-                    
-                    {uiVariants.length > 0 && (
-                        <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 flex gap-2 items-start text-xs text-yellow-700 mt-2">
-                            <AlertCircle size={14} className="mt-0.5 shrink-0"/>
-                            <p>
-                                {t(
-                                    'Lưu ý: Hệ thống sẽ tự khớp "Tên hiển thị" với kho Key hiện có. "Mã SKU" chỉ dùng cho API khi bật chế độ Get Key.',
-                                    'Note: "Label" matches existing Stock. "SKU" is used for API requests only when enabled.'
-                                )}
-                            </p>
-                        </div>
+                            </div>
+                        ))
                     )}
                 </div>
             </div>
 
-            {/* Cột phải: Ảnh & Action */}
+            {/* CỘT PHẢI: ẢNH & ACTION */}
             <div className="space-y-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">{t('Hình ảnh', 'Images')}</h3>
