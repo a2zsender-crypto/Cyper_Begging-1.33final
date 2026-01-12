@@ -40,19 +40,14 @@ export default function ProductDetail() {
     });
   }, [id]);
 
-  // --- HÀM CHECK STOCK REALTIME (ĐÃ SỬA DÙNG RPC) ---
+  // --- HÀM CHECK STOCK REALTIME ---
   const checkStock = async (prod, options) => {
       if (!prod) return;
       setLoadingStock(true);
       
       try {
           if (prod.is_digital) {
-              // [SỬA ĐỔI QUAN TRỌNG]
-              // Sử dụng RPC function 'get_digital_stock' để bypass RLS
-              // Thay vì query trực tiếp bảng product_keys
-              
               const validOptions = Object.keys(options).length > 0 ? options : {};
-
               const { data: count, error } = await supabase.rpc('get_digital_stock', {
                   p_id: prod.id,
                   v_info: validOptions
@@ -66,7 +61,6 @@ export default function ProductDetail() {
               }
 
           } else {
-              // LOGIC PHYSICAL (Giữ nguyên)
               if (prod.variant_stocks && prod.variant_stocks.length > 0) {
                   const stockItem = prod.variant_stocks.find(item => {
                       const itemOpts = item.options;
@@ -87,11 +81,9 @@ export default function ProductDetail() {
       }
   };
 
-  // Trigger checkStock mỗi khi product load xong HOẶC options thay đổi
   useEffect(() => {
       if (!product) return;
       
-      // 1. Tính giá
       let extra = 0;
       if (product.variants) {
           product.variants.forEach(v => {
@@ -101,8 +93,6 @@ export default function ProductDetail() {
           });
       }
       setFinalPrice(product.price + extra);
-
-      // 2. Gọi check stock realtime
       checkStock(product, selectedOptions);
 
   }, [selectedOptions, product]);
@@ -116,14 +106,31 @@ export default function ProductDetail() {
       }
   };
 
+  // [HÀM PHỤ TRỢ] Tìm mã SKU (code) tương ứng với lựa chọn hiện tại
+  const getSelectedVariantCode = () => {
+      if (!product.variants) return null;
+      // Duyệt qua các option đã chọn để tìm xem có mã code nào không
+      // (Thường lấy code của biến thể chính, ví dụ Mệnh giá)
+      for (const [vName, vLabel] of Object.entries(selectedOptions)) {
+          const vGroup = product.variants.find(v => v.name === vName);
+          if (vGroup) {
+              const opt = vGroup.options.find(o => o.label === vLabel);
+              if (opt && opt.code) return opt.code; // Trả về VTT10, VTT20...
+          }
+      }
+      return null;
+  };
+
+  // [SỬA] Bổ sung variant_code vào object gửi xuống giỏ hàng
   const getProductToAdd = () => ({ 
       ...product, 
       price: finalPrice, 
       selectedVariants: selectedOptions,
-      maxStock: currentStock 
+      maxStock: currentStock,
+      variant_code: getSelectedVariantCode() // <--- THÊM DÒNG NÀY
   });
 
-  const isOutOfStock = !loadingStock && currentStock <= 0 && !product?.allow_external_key;
+  const isOutOfStock = !loadingStock && currentStock <= 0 && !product?.allow_api_restock; // [SỬA] Đổi allow_external_key thành allow_api_restock cho khớp DB
 
   const handleAddToCart = () => {
       if (loadingStock) return;
@@ -134,7 +141,8 @@ export default function ProductDetail() {
       );
       const currentQty = currentCartItem ? currentCartItem.quantity : 0;
       
-      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
+      // Nếu không bật API restock thì mới check tồn kho cứng
+      if (!product.allow_api_restock && (currentQty + 1 > currentStock)) {
           return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left in stock.`));
       }
 
@@ -153,7 +161,7 @@ export default function ProductDetail() {
       );
       const currentQty = currentCartItem ? currentCartItem.quantity : 0;
 
-      if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
+      if (!product.allow_api_restock && (currentQty + 1 > currentStock)) {
           return toast.warn(t("Không đủ hàng trong kho!", "Not enough stock!"));
       }
 
@@ -169,7 +177,7 @@ export default function ProductDetail() {
   const displayDesc = lang === 'vi' ? product.description : (product.description_en || product.description);
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 animate-fade-in">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 md:flex gap-10">
         <div className="md:w-1/2 flex flex-col gap-4">
           <div className="h-80 md:h-96 bg-gray-50 rounded-2xl overflow-hidden border border-slate-100 flex items-center justify-center p-4">
@@ -187,7 +195,7 @@ export default function ProductDetail() {
         <div className="md:w-1/2 mt-8 md:mt-0 flex flex-col">
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4 leading-tight">{displayTitle}</h1>
           <div className="flex items-center gap-4 mb-6">
-             <div className="text-3xl font-extrabold text-green-600">{finalPrice.toFixed(2)} USDT</div>
+             <div className="text-3xl font-extrabold text-green-600">{finalPrice.toLocaleString()} USDT</div>
              {product.is_digital ? <span className="flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded-full uppercase"><Zap size={12}/> Digital Key</span> : <span className="flex items-center gap-1 px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full uppercase"><Box size={12}/> Physical</span>}
           </div>
 
@@ -195,12 +203,13 @@ export default function ProductDetail() {
               {loadingStock ? (
                   <span className="animate-pulse">Checking stock...</span>
               ) : !isOutOfStock ? (
-                  <><CheckCircle size={16}/> {product.allow_external_key && currentStock <=0 ? t('Sẵn hàng', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
+                  <><CheckCircle size={16}/> {product.allow_api_restock && currentStock <=0 ? t('Sẵn hàng (API)', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
               ) : (
                   <><AlertTriangle size={16}/> {t('Hết hàng', 'Out of Stock')}</>
               )}
           </div>
 
+          {/* RENDER BIẾN THỂ THEO CẤU TRÚC GỐC */}
           {product.variants && product.variants.length > 0 && (
               <div className="mb-6 space-y-4 p-5 bg-slate-50 rounded-xl border border-slate-100">
                   {product.variants.map((variant, idx) => (
