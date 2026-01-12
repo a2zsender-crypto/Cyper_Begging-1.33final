@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell } from 'lucide-react';
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -39,7 +39,7 @@ export default function Layout() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // LOGIC CHUÔNG (User & Admin) - ĐÃ SỬA LOGIC ĐỒNG BỘ
+  // LOGIC CHUÔNG (User & Admin)
   useEffect(() => {
       if (!session?.user) {
           setNotifications([]);
@@ -49,18 +49,16 @@ export default function Layout() {
       const uid = session.user.id;
 
       const fetchNoti = async () => {
-          // 1. Lấy danh sách hiển thị (15 cái mới nhất)
+          // 1. Lấy danh sách hiển thị
           const { data } = await supabase.from('notifications')
               .select('*')
               .eq('user_id', uid)
               .order('created_at', {ascending: false})
               .limit(15);
           
-          if (data) {
-              setNotifications(data);
-          }
+          if (data) setNotifications(data);
 
-          // 2. Lấy số lượng chưa đọc chính xác từ Database (Fix lỗi hiển thị sai số lượng)
+          // 2. Lấy số lượng chưa đọc
           const { count } = await supabase.from('notifications')
               .select('*', { count: 'exact', head: true })
               .eq('user_id', uid)
@@ -71,14 +69,17 @@ export default function Layout() {
       
       fetchNoti();
 
-      // Lắng nghe thông báo mới
+      // LẮNG NGHE THÔNG BÁO MỚI (Realtime)
       const channel = supabase.channel(`global-noti-${uid}`)
           .on('postgres_changes', 
-              { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` }, 
+              { event: 'INSERT', schema: 'public', table: 'notifications' }, 
               (payload) => {
-                  setNotifications(prev => [payload.new, ...prev]);
-                  setUnreadCount(prev => prev + 1);
-                  toast.info(`🔔 ${payload.new.title}`);
+                  // Chỉ nhận thông báo của chính mình
+                  if (payload.new.user_id === uid) {
+                      setNotifications(prev => [payload.new, ...prev]);
+                      setUnreadCount(prev => prev + 1);
+                      toast.info(`🔔 ${payload.new.title}`);
+                  }
               }
           )
           .subscribe();
@@ -88,29 +89,18 @@ export default function Layout() {
 
   useEffect(() => setIsMenuOpen(false), [location]);
 
-  // --- XỬ LÝ CLICK THÔNG BÁO (ĐÃ FIX DELAY & ĐỒNG BỘ) ---
+  // Xử lý khi click vào 1 thông báo
   const handleReadNoti = async (noti) => {
-      // Chỉ cập nhật nếu chưa đọc
       if (!noti.is_read) {
-          // 1. Cập nhật UI ngay lập tức để trải nghiệm mượt mà
           setUnreadCount(prev => Math.max(0, prev - 1));
           setNotifications(prev => prev.map(n => n.id === noti.id ? { ...n, is_read: true } : n));
-
-          // 2. Gửi lệnh update xuống DB (Cần SQL Policy ở Bước 1 để hoạt động)
-          const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
-          
-          if (error) {
-              console.error("Lỗi update notification:", error);
-              // Nếu lỗi, revert lại UI (tuỳ chọn, nhưng giữ đơn giản thì thôi)
-          }
+          await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
       }
       
       setShowNotiDropdown(false);
 
       if (noti.link) {
           navigate(noti.link); 
-          
-          // NẾU LÀ TICKET: Chờ để trang AdminContacts kịp load
           if (noti.link.includes('ticketId=')) {
              try {
                  const ticketId = noti.link.split('ticketId=')[1];
@@ -120,6 +110,21 @@ export default function Layout() {
              } catch(e) { console.error(e); }
           }
       }
+  };
+
+  // --- TÍNH NĂNG MỚI: ĐÁNH DẤU TẤT CẢ LÀ ĐÃ ĐỌC ---
+  const handleMarkAllRead = async () => {
+      if (notifications.length === 0 || unreadCount === 0) return;
+
+      // 1. Cập nhật UI ngay lập tức
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+
+      // 2. Cập nhật Database
+      await supabase.from('notifications')
+          .update({ is_read: true })
+          .eq('user_id', session.user.id)
+          .eq('is_read', false); 
   };
 
   const handleLogout = async () => { 
@@ -174,9 +179,22 @@ export default function Layout() {
                     </button>
                     {showNotiDropdown && (
                         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-fade-in-up origin-top-right">
+                            {/* DROPDOWN HEADER */}
                             <div className="p-3 border-b bg-gray-50 font-bold text-sm text-gray-700 flex justify-between items-center">
                                 <span>{t('Thông báo', 'Notifications')}</span>
-                                <button onClick={()=>setShowNotiDropdown(false)}><X size={16}/></button>
+                                <div className="flex items-center gap-1">
+                                    {/* NÚT ĐÁNH DẤU TẤT CẢ ĐÃ ĐỌC */}
+                                    <button 
+                                        onClick={handleMarkAllRead} 
+                                        title={t("Đánh dấu tất cả đã đọc", "Mark all as read")}
+                                        className="p-1.5 hover:bg-blue-100 text-blue-600 rounded-lg transition"
+                                    >
+                                        <CheckCheck size={16}/>
+                                    </button>
+                                    <button onClick={()=>setShowNotiDropdown(false)} className="p-1.5 hover:bg-gray-200 rounded-lg transition text-gray-500">
+                                        <X size={16}/>
+                                    </button>
+                                </div>
                             </div>
                             <div className="max-h-80 overflow-y-auto">
                                 {notifications.length > 0 ? notifications.map(n => (
