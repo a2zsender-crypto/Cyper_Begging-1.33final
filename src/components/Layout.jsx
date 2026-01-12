@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useLang } from '../context/LangContext';
-import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck, Shield } from 'lucide-react';
+import { ShoppingCart, User, Globe, LogOut, MapPin, Phone, Bitcoin, Mail, Menu, X, ChevronRight, Bell, CheckCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { ToastContainer, toast } from 'react-toastify';
@@ -18,9 +18,6 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotiDropdown, setShowNotiDropdown] = useState(false);
   const [session, setSession] = useState(null);
-  
-  // State mới: Lưu quyền hạn (Admin/Mod)
-  const [role, setRole] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -36,22 +33,9 @@ export default function Layout() {
     staleTime: 1000 * 60 * 10
   });
 
-  // Hàm lấy role
-  const fetchRole = async (uid) => {
-    const { data } = await supabase.from('profiles').select('role').eq('id', uid).single();
-    if (data) setRole(data.role);
-  };
-
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => { 
-        setSession(session); 
-        if (session?.user) fetchRole(session.user.id);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { 
-        setSession(session); 
-        if (session?.user) fetchRole(session.user.id);
-        else setRole(null);
-    });
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { setSession(session); });
     return () => subscription.unsubscribe();
   }, []);
 
@@ -215,12 +199,12 @@ export default function Layout() {
                             <div className="max-h-80 overflow-y-auto">
                                 {notifications.length > 0 ? notifications.map(n => (
                                     <div key={n.id} onClick={() => handleReadNoti(n)} className={`p-3 border-b hover:bg-blue-50 cursor-pointer transition flex gap-3 ${!n.is_read ? 'bg-blue-50/40' : ''}`}>
-                                            <div className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${!n.is_read ? 'bg-blue-500' : 'bg-transparent'}`}></div>
-                                            <div>
-                                                <p className={`text-sm ${!n.is_read ? 'font-bold text-slate-800' : 'text-slate-600'}`}>{n.title}</p>
-                                                <p className="text-xs text-slate-500 line-clamp-2">{n.message}</p>
-                                                <p className="text-[10px] text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p>
-                                            </div>
+                                        <div className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${!n.is_read ? 'bg-blue-500' : 'bg-transparent'}`}></div>
+                                        <div>
+                                            <p className={`text-sm ${!n.is_read ? 'font-bold text-slate-800' : 'text-slate-600'}`}>{n.title}</p>
+                                            <p className="text-xs text-slate-500 line-clamp-2">{n.message}</p>
+                                            <p className="text-[10px] text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p>
+                                        </div>
                                     </div>
                                 )) : (
                                     <div className="p-8 text-center text-slate-400 text-sm">{t('Không có thông báo', 'No notifications')}</div>
@@ -237,21 +221,10 @@ export default function Layout() {
             </Link>
 
             <div className="group relative hidden md:block">
-                {/* Chỉ dẫn đến Admin nếu có quyền, nếu không thì dẫn đến Support (Profile) */}
-                <Link to={(role === 'admin' || role === 'mod') ? "/admin" : "/support"} className="hover:text-blue-600 block py-2">
-                    <User size={22} />
-                </Link>
+                <Link to="/admin" className="hover:text-blue-600 block py-2"><User size={22} /></Link>
                 <div className="absolute right-0 top-full pt-2 w-56 hidden group-hover:block z-50">
                     <div className="bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
-                        
-                        {/* HIỂN THỊ LINK ADMIN CHO ADMIN VÀ MOD */}
-                        {(role === 'admin' || role === 'mod') && (
-                            <Link to="/admin" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-blue-700 transition border-b border-gray-100">
-                                <Shield size={16}/> {t('Quản trị viên', 'Admin Panel')}
-                            </Link>
-                        )}
-
-                        <Link to="/support" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
+                        <Link to="/admin" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-sm font-medium text-slate-700 transition">
                             <User size={16}/> {t('Tài khoản', 'My Account')}
                         </Link>
                         <div className="border-t border-gray-100"></div>
@@ -271,15 +244,7 @@ export default function Layout() {
                     <Link to="/products" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Sản phẩm', 'Products')} <ChevronRight size={16}/></Link>
                     <Link to="/support" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Hỗ trợ', 'Support')} <ChevronRight size={16}/></Link>
                     <Link to="/contact" className="flex justify-between items-center py-2 border-b border-slate-50 hover:text-blue-600">{t('Liên hệ', 'Contact')} <ChevronRight size={16}/></Link>
-                    
-                    {/* MOBILE LINK CHO ADMIN/MOD */}
-                    {(role === 'admin' || role === 'mod') && (
-                        <Link to="/admin" className="flex justify-between items-center py-2 text-blue-600 font-bold border-b border-slate-50">
-                            {t('Quản trị viên', 'Admin Panel')} <Shield size={16}/>
-                        </Link>
-                    )}
-
-                    <Link to="/support" className="flex justify-between items-center py-2 hover:text-blue-600">{t('Tài khoản', 'Account')} <User size={16}/></Link>
+                    <Link to="/admin" className="flex justify-between items-center py-2 hover:text-blue-600">{t('Tài khoản', 'Account')} <User size={16}/></Link>
                 </div>
             </div>
         )}
