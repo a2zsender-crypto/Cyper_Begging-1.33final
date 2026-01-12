@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { toast } from 'react-toastify';
-import { Save, ArrowLeft, Plus, Trash2, Upload, AlertCircle } from 'lucide-react';
+import { Save, ArrowLeft, Plus, Trash2, Upload, AlertCircle, Zap } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 
 // Hàm helper tạo mã SKU tự động
@@ -37,8 +37,9 @@ export default function ProductDetail() {
     price: 0,
     category: 'Voucher',
     is_digital: true,
+    allow_api_restock: false, // Checkbox gọi API
     images: [],
-    variants: [] // Cấu trúc DB: [{"name": "value", "options": [...]}]
+    variants: [] 
   });
 
   // State riêng để quản lý danh sách biến thể trên giao diện phẳng
@@ -52,17 +53,20 @@ export default function ProductDetail() {
     const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
     if (error) { toast.error(t('Lỗi tải sản phẩm', 'Error loading product')); return; }
     
-    setProduct(data);
+    // Set data và đảm bảo allow_api_restock có giá trị boolean
+    setProduct({
+        ...data,
+        allow_api_restock: data.allow_api_restock || false
+    });
 
     // --- CHUYỂN ĐỔI DỮ LIỆU TỪ DB (Lồng nhau) SANG UI (Phẳng) ---
-    // DB: [{"name": "value", "options": [{"label": "10k", "price_mod": 0, ...}]}]
     if (data.variants && Array.isArray(data.variants) && data.variants.length > 0) {
-        const variantGroup = data.variants[0]; // Lấy nhóm đầu tiên (thường là "value")
+        const variantGroup = data.variants[0]; 
         if (variantGroup.options) {
             const mapped = variantGroup.options.map(opt => ({
-                name: opt.label,              // "10k"
-                code: opt.code || generateSlug(opt.label).toUpperCase(), // code hoặc tự sinh
-                price: opt.price_mod || 0     // giá thêm/bớt
+                name: opt.label,              
+                code: opt.code || generateSlug(opt.label).toUpperCase(), 
+                price: opt.price_mod || 0     
             }));
             setUiVariants(mapped);
         }
@@ -94,9 +98,14 @@ export default function ProductDetail() {
       const newVars = [...uiVariants];
       newVars[index][field] = value;
 
-      // Auto-fill code nếu nhập tên
-      if (field === 'name' && !newVars[index].code) {
-           newVars[index].code = generateSlug(value).toUpperCase();
+      // Logic Auto-fill code:
+      // 1. Nếu đang nhập tên
+      // 2. VÀ (Mã đang trống HOẶC chưa bật chế độ API)
+      // -> Thì mới tự động sinh mã. Nếu bật API rồi thì để người dùng tự quyết.
+      if (field === 'name') {
+           if (!newVars[index].code || !product.allow_api_restock) {
+                newVars[index].code = generateSlug(value).toUpperCase();
+           }
       }
       setUiVariants(newVars);
   };
@@ -106,31 +115,30 @@ export default function ProductDetail() {
     setLoading(true);
 
     // --- CHUYỂN ĐỔI NGƯỢC TỪ UI SANG DB ---
-    // Tạo cấu trúc variants giống hệt mẫu bạn cung cấp
-    // Mặc định tên nhóm là "value" (hoặc "Mệnh giá")
     let finalVariants = [];
     
     if (uiVariants.length > 0) {
         finalVariants = [{
-            name: "value", // Key cố định theo cấu trúc cũ của bạn
+            name: "value", 
             options: uiVariants.map(v => ({
-                image: "",          // Giữ nguyên structure
-                label: v.name,      // Tên tiếng Việt
-                label_en: v.name,   // Tên tiếng Anh (tạm lấy giống TV)
-                price_mod: Number(v.price), // Giá
-                code: v.code || generateSlug(v.name).toUpperCase() // THÊM CỘT NÀY ĐỂ KHỚP LOGIC MỚI
+                image: "",          
+                label: v.name,      
+                label_en: v.name,   
+                price_mod: Number(v.price), 
+                code: v.code || generateSlug(v.name).toUpperCase() 
             }))
         }];
     }
 
     const payload = { 
         ...product, 
-        variants: finalVariants, // Lưu vào cột variants
-        // variants_config: null // (Tùy chọn) Xóa cột cũ nếu muốn dọn dẹp
+        variants: finalVariants, 
     };
     
     delete payload.id; 
     delete payload.created_at;
+    // Bỏ variants_config cũ đi nếu có để tránh rác
+    delete payload.variants_config; 
 
     let error;
     if (isEdit) {
@@ -195,6 +203,32 @@ export default function ProductDetail() {
                             </select>
                         </div>
                     </div>
+                    
+                    {/* CHECKBOX API REQUEST */}
+                    {product.is_digital && (
+                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3">
+                            <input 
+                                type="checkbox" 
+                                id="apiCheck"
+                                className="mt-1 w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
+                                checked={product.allow_api_restock}
+                                onChange={e => setProduct({...product, allow_api_restock: e.target.checked})}
+                            />
+                            <div>
+                                <label htmlFor="apiCheck" className="block text-sm font-bold text-indigo-900 cursor-pointer flex items-center gap-2">
+                                    <Zap size={16} className="text-indigo-600"/>
+                                    {t("Get Key over API if Out of Stock", "Get Key over API if Out of Stock")}
+                                </label>
+                                <p className="text-xs text-indigo-700 mt-1">
+                                    {t(
+                                        "Khi bật: Hệ thống sẽ gọi API bên thứ 3 (Appota, Banthe247...) bằng Mã SKU bên dưới nếu kho hết hàng.",
+                                        "Enabled: System will call 3rd party API using the SKU Code below if out of stock."
+                                    )}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-sm font-medium text-slate-600 mb-1">{t('Giá mặc định (VNĐ)', 'Default Price (VND)')}</label>
                         <input type="number" className="w-full border p-2 rounded-lg font-mono"
@@ -203,7 +237,7 @@ export default function ProductDetail() {
                     </div>
                 </div>
 
-                {/* Phần cấu hình biến thể (ĐÃ KHỚP CẤU TRÚC DB CŨ) */}
+                {/* Phần cấu hình biến thể */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                     <div className="flex justify-between items-center border-b pb-2">
                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
@@ -222,7 +256,10 @@ export default function ProductDetail() {
                         <div className="space-y-3">
                             <div className="grid grid-cols-12 gap-2 text-xs font-bold text-slate-500 uppercase bg-slate-50 p-2 rounded">
                                 <div className="col-span-5">{t('Tên hiển thị', 'Label')}</div>
-                                <div className="col-span-4">{t('Mã SKU (API/Key)', 'SKU Code')}</div>
+                                <div className="col-span-4 flex items-center gap-1">
+                                    {t('Mã SKU / API Code', 'SKU / API Code')}
+                                    {product.allow_api_restock && <Zap size={12} className="text-indigo-600"/>}
+                                </div>
                                 <div className="col-span-2">{t('Giá riêng', 'Price')}</div>
                                 <div className="col-span-1"></div>
                             </div>
@@ -238,8 +275,13 @@ export default function ProductDetail() {
                                     </div>
                                     <div className="col-span-4 relative">
                                         <input 
-                                            placeholder="AUTO..."
-                                            className="w-full border p-2 rounded font-mono text-sm text-blue-600 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none"
+                                            placeholder={product.allow_api_restock ? "NHẬP MÃ API (VD: VTT10)" : "Auto Generated"}
+                                            className={`w-full border p-2 rounded font-mono text-sm outline-none transition-colors
+                                                ${product.allow_api_restock 
+                                                    ? 'bg-white border-indigo-300 focus:border-indigo-500 text-indigo-700 font-bold' 
+                                                    : 'bg-slate-50 text-slate-500 border-slate-200 focus:bg-white'
+                                                }
+                                            `}
                                             value={v.code}
                                             onChange={e => updateVariant(idx, 'code', e.target.value)}
                                         />
@@ -268,8 +310,8 @@ export default function ProductDetail() {
                             <AlertCircle size={14} className="mt-0.5 shrink-0"/>
                             <p>
                                 {t(
-                                    'Lưu ý: "Tên hiển thị" cần khớp với "Value" trong bảng Product Keys nếu bạn dùng key cũ.',
-                                    'Note: "Label" must match "Value" in Product Keys table for existing keys.'
+                                    'Lưu ý: Nếu dùng API, hãy đảm bảo "Mã SKU" khớp chính xác với mã sản phẩm của nhà cung cấp (VD: Appota là VTT10).',
+                                    'Note: If using API, ensure "SKU Code" matches exactly with the provider\'s product code (e.g., VTT10).'
                                 )}
                             </p>
                         </div>
