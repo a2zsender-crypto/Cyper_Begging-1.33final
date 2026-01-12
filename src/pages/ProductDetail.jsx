@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { toast } from 'react-toastify';
-import { Save, ArrowLeft, Plus, Trash2, Upload, AlertCircle, Zap } from 'lucide-react';
+import { Save, ArrowLeft, Plus, Trash2, Upload, Zap, AlertCircle } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 
-// Hàm helper tạo mã SKU tự động
+// Hàm helper tạo mã SKU tự động (Slug)
 const generateSlug = (text) => {
   if (!text) return '';
   return text
@@ -37,12 +37,12 @@ export default function ProductDetail() {
     price: 0,
     category: 'Voucher',
     is_digital: true,
-    allow_api_restock: false, // Checkbox gọi API
+    allow_api_restock: false, // Cột mới trong DB
     images: [],
-    variants: [] 
+    variants: [] // Cấu trúc JSON gốc: [{"name": "value", "options": [...]}]
   });
 
-  // State riêng để quản lý danh sách biến thể trên giao diện phẳng
+  // State tạm để hứng dữ liệu biến thể hiển thị lên UI
   const [uiVariants, setUiVariants] = useState([]);
 
   useEffect(() => {
@@ -50,23 +50,26 @@ export default function ProductDetail() {
   }, [id]);
 
   const fetchProduct = async () => {
+    // Rà soát cấu trúc bảng: Lấy allow_api_restock nếu có
     const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
     if (error) { toast.error(t('Lỗi tải sản phẩm', 'Error loading product')); return; }
     
-    // Set data và đảm bảo allow_api_restock có giá trị boolean
+    // Gán dữ liệu vào state
     setProduct({
         ...data,
-        allow_api_restock: data.allow_api_restock || false
+        allow_api_restock: data.allow_api_restock === true // Đảm bảo boolean
     });
 
-    // --- CHUYỂN ĐỔI DỮ LIỆU TỪ DB (Lồng nhau) SANG UI (Phẳng) ---
+    // --- LOGIC QUAN TRỌNG: MAP DỮ LIỆU CŨ LÊN GIAO DIỆN ---
+    // Cấu trúc DB: variants = [ { "name": "value", "options": [ { "label": "10k", "price_mod": 0, ... } ] } ]
     if (data.variants && Array.isArray(data.variants) && data.variants.length > 0) {
-        const variantGroup = data.variants[0]; 
-        if (variantGroup.options) {
-            const mapped = variantGroup.options.map(opt => ({
-                name: opt.label,              
-                code: opt.code || generateSlug(opt.label).toUpperCase(), 
-                price: opt.price_mod || 0     
+        const group = data.variants[0]; // Lấy nhóm đầu tiên
+        if (group && group.options && Array.isArray(group.options)) {
+            const mapped = group.options.map(opt => ({
+                name: opt.label || opt.value, // Lấy tên hiển thị (ưu tiên label)
+                // Lấy code cũ nếu có, nếu không thì lấy value, hoặc generate
+                code: opt.code || opt.value || generateSlug(opt.label).toUpperCase(),
+                price: opt.price_mod || 0
             }));
             setUiVariants(mapped);
         }
@@ -83,7 +86,7 @@ export default function ProductDetail() {
       setProduct({ ...product, images: [...(product.images||[]), data.publicUrl] });
   };
 
-  // --- LOGIC UI BIẾN THỂ ---
+  // --- THAO TÁC TRÊN UI VARIANTS ---
   const addVariant = () => {
       setUiVariants([...uiVariants, { name: '', code: '', price: 0 }]);
   };
@@ -98,12 +101,11 @@ export default function ProductDetail() {
       const newVars = [...uiVariants];
       newVars[index][field] = value;
 
-      // Logic Auto-fill code:
-      // 1. Nếu đang nhập tên
-      // 2. VÀ (Mã đang trống HOẶC chưa bật chế độ API)
-      // -> Thì mới tự động sinh mã. Nếu bật API rồi thì để người dùng tự quyết.
+      // Logic sinh mã tự động:
+      // Chỉ sinh mã khi đang nhập Tên VÀ (Mã đang trống HOẶC chưa bật chế độ API)
       if (field === 'name') {
-           if (!newVars[index].code || !product.allow_api_restock) {
+           const currentCode = newVars[index].code;
+           if (!currentCode || !product.allow_api_restock) {
                 newVars[index].code = generateSlug(value).toUpperCase();
            }
       }
@@ -114,31 +116,34 @@ export default function ProductDetail() {
     e.preventDefault();
     setLoading(true);
 
-    // --- CHUYỂN ĐỔI NGƯỢC TỪ UI SANG DB ---
+    // --- KHÔI PHỤC CẤU TRÚC JSON GỐC ĐỂ LƯU DB ---
     let finalVariants = [];
     
     if (uiVariants.length > 0) {
         finalVariants = [{
-            name: "value", 
-            options: uiVariants.map(v => ({
-                image: "",          
-                label: v.name,      
-                label_en: v.name,   
-                price_mod: Number(v.price), 
-                code: v.code || generateSlug(v.name).toUpperCase() 
+            "name": "value", // Giữ nguyên key "value" để khớp logic Frontend cũ
+            "options": uiVariants.map(v => ({
+                "label": v.name,      // Tên hiển thị (VN)
+                "label_en": v.name,   // Tên hiển thị (EN) - tạm để giống VN
+                "value": v.name,      // Cần thiết cho logic khớp kho cũ (product_keys.variant_info.value)
+                "price_mod": Number(v.price),
+                "image": "",          // Giữ structure cũ
+                "code": v.code || generateSlug(v.name).toUpperCase() // Cột mới thêm để phục vụ API
             }))
         }];
     }
 
     const payload = { 
         ...product, 
-        variants: finalVariants, 
+        variants: finalVariants,
+        // Đảm bảo gửi đúng boolean cho cột allow_api_restock
+        allow_api_restock: product.allow_api_restock 
     };
     
+    // Loại bỏ các trường không tồn tại trong bảng products (tránh lỗi cột ảo)
     delete payload.id; 
     delete payload.created_at;
-    // Bỏ variants_config cũ đi nếu có để tránh rác
-    delete payload.variants_config; 
+    delete payload.variants_config; // Xóa cột rác nếu lỡ có từ code cũ
 
     let error;
     if (isEdit) {
@@ -148,9 +153,10 @@ export default function ProductDetail() {
     }
 
     setLoading(false);
-    if (error) toast.error("Error: " + error.message);
-    else {
-        toast.success(t("Đã lưu sản phẩm!", "Product Saved!"));
+    if (error) {
+        toast.error("Database Error: " + error.message);
+    } else {
+        toast.success(t("Đã lưu sản phẩm thành công!", "Product Saved Successfully!"));
         navigate('/admin/products');
     }
   };
@@ -203,14 +209,14 @@ export default function ProductDetail() {
                             </select>
                         </div>
                     </div>
-                    
-                    {/* CHECKBOX API REQUEST */}
+
+                    {/* Checkbox API Restock */}
                     {product.is_digital && (
-                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3">
-                            <input 
+                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3 mt-2">
+                             <input 
                                 type="checkbox" 
                                 id="apiCheck"
-                                className="mt-1 w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
+                                className="mt-1 w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
                                 checked={product.allow_api_restock}
                                 onChange={e => setProduct({...product, allow_api_restock: e.target.checked})}
                             />
@@ -221,8 +227,8 @@ export default function ProductDetail() {
                                 </label>
                                 <p className="text-xs text-indigo-700 mt-1">
                                     {t(
-                                        "Khi bật: Hệ thống sẽ gọi API bên thứ 3 (Appota, Banthe247...) bằng Mã SKU bên dưới nếu kho hết hàng.",
-                                        "Enabled: System will call 3rd party API using the SKU Code below if out of stock."
+                                        "Khi bật: Cho phép chỉnh sửa Mã SKU bên dưới để khớp với hệ thống API (Appota, Banthe247...).",
+                                        "Enabled: Allows editing SKU Code below to match API providers."
                                     )}
                                 </p>
                             </div>
@@ -255,9 +261,9 @@ export default function ProductDetail() {
                     ) : (
                         <div className="space-y-3">
                             <div className="grid grid-cols-12 gap-2 text-xs font-bold text-slate-500 uppercase bg-slate-50 p-2 rounded">
-                                <div className="col-span-5">{t('Tên hiển thị', 'Label')}</div>
+                                <div className="col-span-5">{t('Tên hiển thị (Label)', 'Label')}</div>
                                 <div className="col-span-4 flex items-center gap-1">
-                                    {t('Mã SKU / API Code', 'SKU / API Code')}
+                                    {t('Mã SKU / API Code', 'SKU')}
                                     {product.allow_api_restock && <Zap size={12} className="text-indigo-600"/>}
                                 </div>
                                 <div className="col-span-2">{t('Giá riêng', 'Price')}</div>
@@ -265,6 +271,7 @@ export default function ProductDetail() {
                             </div>
                             {uiVariants.map((v, idx) => (
                                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                                    {/* Tên hiển thị */}
                                     <div className="col-span-5">
                                         <input 
                                             placeholder="VD: 50k, 123..."
@@ -273,19 +280,25 @@ export default function ProductDetail() {
                                             onChange={e => updateVariant(idx, 'name', e.target.value)}
                                         />
                                     </div>
+                                    
+                                    {/* Mã SKU - Logic Disable/Enable */}
                                     <div className="col-span-4 relative">
                                         <input 
-                                            placeholder={product.allow_api_restock ? "NHẬP MÃ API (VD: VTT10)" : "Auto Generated"}
+                                            // Nếu cho phép API -> Cho sửa thoải mái. Nếu không -> Readonly và màu xám
+                                            readOnly={!product.allow_api_restock}
+                                            placeholder="Auto Generated"
                                             className={`w-full border p-2 rounded font-mono text-sm outline-none transition-colors
                                                 ${product.allow_api_restock 
                                                     ? 'bg-white border-indigo-300 focus:border-indigo-500 text-indigo-700 font-bold' 
-                                                    : 'bg-slate-50 text-slate-500 border-slate-200 focus:bg-white'
+                                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                                                 }
                                             `}
                                             value={v.code}
                                             onChange={e => updateVariant(idx, 'code', e.target.value)}
                                         />
                                     </div>
+
+                                    {/* Giá tiền */}
                                     <div className="col-span-2">
                                         <input 
                                             type="number"
@@ -295,6 +308,8 @@ export default function ProductDetail() {
                                             onChange={e => updateVariant(idx, 'price', Number(e.target.value))}
                                         />
                                     </div>
+
+                                    {/* Nút xóa */}
                                     <div className="col-span-1 text-center">
                                         <button type="button" onClick={() => removeVariant(idx)} className="text-red-400 hover:text-red-600 transition">
                                             <Trash2 size={18}/>
@@ -310,8 +325,8 @@ export default function ProductDetail() {
                             <AlertCircle size={14} className="mt-0.5 shrink-0"/>
                             <p>
                                 {t(
-                                    'Lưu ý: Nếu dùng API, hãy đảm bảo "Mã SKU" khớp chính xác với mã sản phẩm của nhà cung cấp (VD: Appota là VTT10).',
-                                    'Note: If using API, ensure "SKU Code" matches exactly with the provider\'s product code (e.g., VTT10).'
+                                    'Lưu ý: Hệ thống sẽ tự khớp "Tên hiển thị" với kho Key hiện có. "Mã SKU" chỉ dùng cho API khi bật chế độ Get Key.',
+                                    'Note: "Label" matches existing Stock. "SKU" is used for API requests only when enabled.'
                                 )}
                             </p>
                         </div>
