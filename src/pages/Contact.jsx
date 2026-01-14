@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-// [FIX 1] Bỏ react-i18next, dùng LangContext của bạn
-import { useLang } from '../context/LangContext'; 
 import { Link } from 'react-router-dom';
+// [FIX 1] Dùng Context nội bộ thay vì thư viện ngoài để đồng bộ dữ liệu
+import { useLang } from '../context/LangContext';
 
 const Contact = () => {
-  // [FIX 2] Lấy t (hàm dịch) và lang (biến ngôn ngữ 'en'/'vi') từ Context
-  const { t, lang } = useLang(); 
+  // [FIX 2] Lấy hàm t và biến lang từ Context
+  const { t, lang } = useLang();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -82,7 +82,7 @@ const Contact = () => {
 
     setLoading(true);
     try {
-        // [FIX 3] Gửi request kèm user_id và language lấy từ Context
+        // [FIX 3] Gửi request kèm user_id và biến 'lang' lấy từ Context
         const { data, error } = await supabase.functions.invoke('contact-handler', {
             body: { 
                 name: formData.name, 
@@ -90,7 +90,7 @@ const Contact = () => {
                 phone: formData.phone, 
                 message: formData.message,
                 user_id: session?.user?.id || null, 
-                language: lang // Gửi biến 'en' hoặc 'vi' xuống để SQL xử lý thông báo
+                language: lang // Gửi 'vi' hoặc 'en' chuẩn từ Context
             }
         });
 
@@ -137,7 +137,7 @@ const Contact = () => {
               <label className="block text-gray-700">Email</label>
               <input type="email" name="email" required 
                 value={formData.email} onChange={handleChange}
-                disabled={!!session} 
+                disabled={!!session} // Không cho sửa email nếu đã login
                 className="w-full border p-2 rounded focus:ring focus:ring-blue-200 disabled:bg-gray-100" />
             </div>
 
@@ -186,7 +186,7 @@ const Contact = () => {
             </ul>
           </div>
 
-          {/* Bảng Lịch sử Hỗ trợ */}
+          {/* Lịch sử Hỗ trợ (Chỉ hiện khi login) */}
           {showHistory && (
              <div className="bg-white p-6 shadow rounded-lg">
                 <h2 className="text-xl font-semibold mb-4">{t("Lịch sử hỗ trợ của bạn", "Your Support History")}</h2>
@@ -210,11 +210,11 @@ const Contact = () => {
                                             #{item.id}
                                         </td>
                                         <td className="py-2 px-3">
-                                            {new Date(item.created_at).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US')}
+                                            {new Date(item.created_at).toLocaleDateString('vi-VN')}
                                         </td>
                                         <td className="py-2 px-3">
                                             <div className="truncate w-32" title={item.message}>{item.message}</div>
-                                            {item.status === 'replied' || item.status === 'processed' ? (
+                                            {(item.status === 'replied' || item.status === 'processed') ? (
                                                 <Link to={`/contact?ticketId=${item.id}`} className="text-xs text-blue-600 hover:underline block mt-1">
                                                     {t("Xem trả lời", "View Reply")}
                                                 </Link>
