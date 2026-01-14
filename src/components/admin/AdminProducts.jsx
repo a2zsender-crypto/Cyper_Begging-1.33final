@@ -147,7 +147,7 @@ export default function AdminProducts() {
           const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
           
           updateSkuField(index, 'image', data.publicUrl);
-          toast.success("Đã tải ảnh biến thể!");
+          toast.success(t("Đã tải ảnh biến thể!", "Variant image uploaded!"));
       } catch (err) { 
           toast.error(err.message); 
       } finally { 
@@ -166,7 +166,7 @@ export default function AdminProducts() {
           if(error) throw error;
           const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
           setProductForm(prev => ({ ...prev, images: [...(prev.images || []), data.publicUrl] }));
-          toast.success("Đã tải ảnh chung!");
+          toast.success(t("Đã tải ảnh chung!", "Product image uploaded!"));
       } catch (err) { toast.error(err.message); } finally { setUploading(false); }
   };
   
@@ -267,7 +267,7 @@ export default function AdminProducts() {
 
       } catch (err) { 
           console.error(err);
-          toast.error("Lỗi: " + err.message); 
+          toast.error(t("Lỗi: ", "Error: ") + err.message); 
       } finally {
           setProcessing(false);
       }
@@ -305,7 +305,7 @@ export default function AdminProducts() {
             toast.success(t(`Đã thêm ${insertData.length} Keys!`, `Added ${insertData.length} Keys!`));
 
             if (targetSku && targetSku.id) {
-                 // Logic cộng dồn tạm thời trên UI (Thực tế nên dùng RPC hoặc trigger)
+                 // Logic cộng dồn tạm thời trên UI
                  const newStock = (parseInt(targetSku.stock) || 0) + insertData.length;
                  await supabase.from('product_variants').update({stock: newStock}).eq('id', targetSku.id);
                  
@@ -315,7 +315,7 @@ export default function AdminProducts() {
 
         } else {
             const qtyToAdd = parseInt(stockInput);
-            if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn("Số lượng > 0");
+            if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn(t("Số lượng phải lớn hơn 0", "Quantity must be > 0"));
 
             if (targetSku) {
                 const newStock = (parseInt(targetSku.stock) || 0) + qtyToAdd;
@@ -339,7 +339,7 @@ export default function AdminProducts() {
         setKeyInput(''); setStockInput(0); setShowKeyModal(null);
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
 
-    } catch (err) { toast.error("Lỗi: " + err.message); }
+    } catch (err) { toast.error(t("Lỗi: ", "Error: ") + err.message); }
   };
 
 
@@ -350,7 +350,7 @@ export default function AdminProducts() {
        <div className="flex justify-between mb-6 items-center">
          <div>
             <h2 className="text-2xl font-bold text-slate-800">{t('Kho Sản Phẩm & Biến Thể', 'Product & Variants')}</h2>
-            <p className="text-sm text-slate-500">Quản lý sản phẩm, thiết lập biến thể cha-con và tồn kho chi tiết.</p>
+            <p className="text-sm text-slate-500">{t('Quản lý sản phẩm, thiết lập biến thể cha-con và tồn kho chi tiết.', 'Manage products, variants and inventory.')}</p>
          </div>
          <button onClick={openAddModal} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow hover:bg-blue-700 transition"><Plus size={18}/> {t('Thêm Mới', 'Add New')}</button>
        </div>
@@ -397,23 +397,22 @@ export default function AdminProducts() {
                              ))}
                          </div>
                      ) : (
-                         <span className="text-sm text-slate-400 italic">No variants</span>
+                         <span className="text-sm text-slate-400 italic">{t('Không có biến thể', 'No variants')}</span>
                      )}
                  </td>
                  <td className="p-4">
                      <span className="font-mono font-bold text-lg text-slate-700">
-                        {/* Nếu có variants, hiển thị dấu gạch ngang hoặc logic tính tổng */}
-                        {hasVariants ? 'Check Detail' : (p.physical_stock || 0)}
+                        {hasVariants ? t('Xem chi tiết', 'Check Detail') : (p.physical_stock || 0)}
                      </span>
                  </td>
                  <td className="p-4 text-right">
                     <div className="flex justify-end gap-2">
                         {!hasVariants && (
-                             <button onClick={()=>setShowKeyModal({product: p, variant: null})} className="p-2 bg-green-50 text-green-600 rounded hover:bg-green-100" title="Add Stock/Key">
+                             <button onClick={()=>setShowKeyModal({product: p, variant: null})} className="p-2 bg-green-50 text-green-600 rounded hover:bg-green-100" title={t("Nhập kho/Key", "Add Stock/Key")}>
                                  <Plus size={16}/>
                              </button>
                         )}
-                        <button onClick={()=>openEditModal(p)} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100" title="Edit">
+                        <button onClick={()=>openEditModal(p)} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100" title={t("Sửa", "Edit")}>
                             <Edit size={16}/>
                         </button>
                     </div>
@@ -434,7 +433,7 @@ export default function AdminProducts() {
                       <h2 className="text-xl font-bold text-slate-800">
                           {productForm.id ? t('Chi tiết sản phẩm', 'Product Details') : t('Thêm sản phẩm mới', 'Add New Product')}
                       </h2>
-                      <p className="text-xs text-slate-400">Thiết lập thông tin chung và cấu hình biến thể</p>
+                      <p className="text-xs text-slate-400">{t('Thiết lập thông tin chung và cấu hình biến thể', 'Setup general info and variant configuration')}</p>
                   </div>
                   <button onClick={() => setShowProductModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition"><X size={20}/></button>
               </div>
@@ -444,19 +443,19 @@ export default function AdminProducts() {
                  
                  {/* 1. THÔNG TIN CƠ BẢN */}
                  <section>
-                     <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 border-l-4 border-blue-500 pl-3">1. Thông tin chung</h3>
+                     <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 border-l-4 border-blue-500 pl-3">{t('1. Thông tin chung', '1. General Info')}</h3>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Tên sản phẩm (VN) <span className="text-red-500">*</span></label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">{t('Tên sản phẩm (VN)', 'Product Name (VN)')} <span className="text-red-500">*</span></label>
                                 <input required className="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" value={productForm.title} onChange={e=>setProductForm({...productForm, title: e.target.value})}/>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Giá cơ bản ($ USDT) <span className="text-red-500">*</span></label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">{t('Giá cơ bản ($ USDT)', 'Base Price ($ USDT)')} <span className="text-red-500">*</span></label>
                                 <input type="number" step="0.01" required className="w-full border border-slate-300 p-2.5 rounded-lg font-mono text-green-600 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.price} onChange={e=>setProductForm({...productForm, price: e.target.value})}/>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Loại sản phẩm</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">{t('Loại sản phẩm', 'Product Type')}</label>
                                 <div className="flex gap-4">
                                     <label className={`flex-1 border p-3 rounded-lg cursor-pointer flex items-center gap-2 transition ${productForm.is_digital ? 'bg-purple-50 border-purple-200 text-purple-700' : 'hover:bg-slate-50'}`}>
                                         <input type="radio" name="type" checked={productForm.is_digital} onChange={()=>setProductForm({...productForm, is_digital: true})} className="w-4 h-4 text-purple-600"/>
@@ -466,22 +465,31 @@ export default function AdminProducts() {
                                     <label className={`flex-1 border p-3 rounded-lg cursor-pointer flex items-center gap-2 transition ${!productForm.is_digital ? 'bg-orange-50 border-orange-200 text-orange-700' : 'hover:bg-slate-50'}`}>
                                         <input type="radio" name="type" checked={!productForm.is_digital} onChange={()=>setProductForm({...productForm, is_digital: false})} className="w-4 h-4 text-orange-600"/>
                                         <Package size={18}/>
-                                        <span className="font-bold">Vật lý (Ship)</span>
+                                        <span className="font-bold">{t('Vật lý (Ship)', 'Physical (Ship)')}</span>
                                     </label>
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Tên tiếng Anh (Optional)</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">{t('Tên tiếng Anh (Optional)', 'English Name (Optional)')}</label>
                                 <input className="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" value={productForm.title_en} onChange={e=>setProductForm({...productForm, title_en: e.target.value})}/>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả ngắn</label>
-                                <textarea className="w-full border border-slate-300 p-2.5 rounded-lg h-24 resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.description} onChange={e=>setProductForm({...productForm, description: e.target.value})}></textarea>
+                            
+                            {/* FIX: Tách 2 ô mô tả */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">{t('Mô tả (VN)', 'Desc (VN)')}</label>
+                                    <textarea className="w-full border border-slate-300 p-2.5 rounded-lg h-24 resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.description} onChange={e=>setProductForm({...productForm, description: e.target.value})}></textarea>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">{t('Mô tả (EN)', 'Desc (EN)')}</label>
+                                    <textarea className="w-full border border-slate-300 p-2.5 rounded-lg h-24 resize-none focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" value={productForm.description_en} onChange={e=>setProductForm({...productForm, description_en: e.target.value})}></textarea>
+                                </div>
                             </div>
+
                              <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Hình ảnh chung (Hiển thị khi chưa chọn biến thể)</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">{t('Hình ảnh chung', 'General Images')}</label>
                                 <div className="flex flex-wrap gap-2">
                                     {productForm.images?.map((img, idx) => (
                                         <div key={idx} className="relative w-16 h-16 border rounded overflow-hidden group">
@@ -499,18 +507,18 @@ export default function AdminProducts() {
                      </div>
                  </section>
 
-                 {/* 2. CẤU HÌNH BIẾN THỂ (DEFINITION) - CHỈ NHẬP TÊN, KO NHẬP ẢNH/GIÁ TẠI ĐÂY */}
+                 {/* 2. CẤU HÌNH BIẾN THỂ (DEFINITION) */}
                  <section>
                     <div className="flex justify-between items-center mb-4 border-l-4 border-purple-500 pl-3">
-                        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">2. Cấu hình biến thể (Options)</h3>
+                        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">{t('2. Cấu hình biến thể (Options)', '2. Variant Options')}</h3>
                         <button type="button" onClick={addVariantGroup} className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-purple-700 transition flex items-center gap-1">
-                            <Plus size={14}/> Thêm nhóm (VD: Size, Màu)
+                            <Plus size={14}/> {t('Thêm nhóm (VD: Size)', 'Add Group')}
                         </button>
                     </div>
 
                     <div className="space-y-4 bg-slate-50 p-6 rounded-xl border border-slate-200">
                         {productForm.variants.length === 0 && (
-                            <div className="text-center text-slate-400 text-sm py-4">Sản phẩm chưa có biến thể (Sản phẩm đơn).</div>
+                            <div className="text-center text-slate-400 text-sm py-4">{t('Sản phẩm chưa có biến thể (Sản phẩm đơn).', 'Product has no variants (Single product).')}</div>
                         )}
                         
                         {productForm.variants.map((group, gIdx) => (
@@ -519,11 +527,11 @@ export default function AdminProducts() {
                                 
                                 <div className="grid grid-cols-12 gap-4">
                                     <div className="col-span-3">
-                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Tên nhóm</label>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">{t('Tên nhóm', 'Group Name')}</label>
                                         <input type="text" placeholder="Ví dụ: Size..." className="w-full border border-slate-300 rounded p-2 text-sm font-bold focus:border-purple-500 outline-none" value={group.name} onChange={(e) => updateVariantName(gIdx, e.target.value)} />
                                     </div>
                                     <div className="col-span-9">
-                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Các lựa chọn (VN / EN)</label>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">{t('Các lựa chọn (VN / EN)', 'Options (VN / EN)')}</label>
                                         <div className="flex flex-wrap gap-2">
                                             {group.options.map((opt, oIdx) => (
                                                 <div key={oIdx} className="flex items-center gap-1 bg-slate-100 pl-2 pr-1 py-1 rounded border border-slate-200">
@@ -533,7 +541,7 @@ export default function AdminProducts() {
                                                     <button type="button" onClick={() => removeOptionFromGroup(gIdx, oIdx)} className="text-slate-400 hover:text-red-500 ml-1"><X size={14}/></button>
                                                 </div>
                                             ))}
-                                            <button type="button" onClick={() => addOptionToGroup(gIdx)} className="px-2 py-1 text-xs bg-blue-50 text-blue-600 font-bold rounded hover:bg-blue-100">+ Thêm</button>
+                                            <button type="button" onClick={() => addOptionToGroup(gIdx)} className="px-2 py-1 text-xs bg-blue-50 text-blue-600 font-bold rounded hover:bg-blue-100">{t('+ Thêm', '+ Add')}</button>
                                         </div>
                                     </div>
                                 </div>
@@ -542,19 +550,19 @@ export default function AdminProducts() {
                     </div>
                  </section>
 
-                 {/* 3. MA TRẬN SKU (SKU MATRIX) - ẢNH VÀ GIÁ Ở ĐÂY */}
+                 {/* 3. MA TRẬN SKU (SKU MATRIX) */}
                  {productForm.variants.length > 0 && skuList.length > 0 && (
                      <section>
-                         <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 border-l-4 border-green-500 pl-3">3. Chi tiết biến thể & Ảnh (SKU Matrix)</h3>
+                         <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 border-l-4 border-green-500 pl-3">{t('3. Chi tiết biến thể & Ảnh (SKU Matrix)', '3. Variant Details & Images')}</h3>
                          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
                              <table className="w-full text-sm text-left bg-white">
                                  <thead className="bg-slate-100 text-xs uppercase text-slate-500 font-bold">
                                      <tr>
-                                         <th className="p-4">Biến thể</th>
-                                         <th className="p-4 w-32 text-center">Hình ảnh</th>
-                                         <th className="p-4 w-40">Giá (+/-)</th>
-                                         <th className="p-4 w-32 text-center">Tồn kho</th>
-                                         <th className="p-4 w-24">Action</th>
+                                         <th className="p-4">{t('Biến thể', 'Variant')}</th>
+                                         <th className="p-4 w-32 text-center">{t('Hình ảnh', 'Image')}</th>
+                                         <th className="p-4 w-40">{t('Giá (+/-)', 'Price (+/-)')}</th>
+                                         <th className="p-4 w-32 text-center">{t('Tồn kho', 'Stock')}</th>
+                                         <th className="p-4 w-24">{t('Thao tác', 'Action')}</th>
                                      </tr>
                                  </thead>
                                  <tbody className="divide-y divide-slate-100">
@@ -567,7 +575,6 @@ export default function AdminProducts() {
                                                  </div>
                                              </td>
                                              <td className="p-4 text-center">
-                                                 {/* CẬP NHẬT: UPLOAD ẢNH RIÊNG CHO TỪNG VARIANT */}
                                                  <div className="relative w-12 h-12 mx-auto border rounded bg-slate-50 flex items-center justify-center cursor-pointer group overflow-hidden">
                                                      {sku.image ? (
                                                          <img src={sku.image} className="w-full h-full object-cover"/>
@@ -590,7 +597,7 @@ export default function AdminProducts() {
                                                  <div className={`font-bold ${sku.stock > 0 ? 'text-green-600' : 'text-red-500'}`}>{sku.stock}</div>
                                              </td>
                                              <td className="p-4">
-                                                 <button type="button" onClick={() => setShowKeyModal({product: productForm, sku: sku})} className="p-2 bg-slate-100 hover:bg-slate-800 hover:text-white rounded-lg transition" title="Nhập hàng">
+                                                 <button type="button" onClick={() => setShowKeyModal({product: productForm, sku: sku})} className="p-2 bg-slate-100 hover:bg-slate-800 hover:text-white rounded-lg transition" title={t("Nhập hàng", "Add Stock")}>
                                                      {productForm.is_digital ? <Key size={16}/> : <Package size={16}/>}
                                                  </button>
                                              </td>
@@ -606,19 +613,19 @@ export default function AdminProducts() {
                  {(!productForm.variants || productForm.variants.length === 0) && (
                      <section className="bg-slate-50 p-6 rounded-xl border border-slate-200 flex justify-between items-center">
                          <div>
-                             <h3 className="font-bold text-slate-800">Quản lý kho (Sản phẩm đơn)</h3>
-                             <p className="text-sm text-slate-500">Sản phẩm không có biến thể.</p>
+                             <h3 className="font-bold text-slate-800">{t('Quản lý kho (Sản phẩm đơn)', 'Inventory (Single Product)')}</h3>
+                             <p className="text-sm text-slate-500">{t('Sản phẩm không có biến thể.', 'Product has no variants.')}</p>
                          </div>
                          <div className="flex items-center gap-4">
                              <div className="text-right">
-                                 <span className="block text-xs text-slate-500 uppercase font-bold">Hiện có</span>
+                                 <span className="block text-xs text-slate-500 uppercase font-bold">{t('Hiện có', 'Available')}</span>
                                  <span className="text-2xl font-bold text-slate-800">{productForm.physical_stock}</span>
                              </div>
                              <button type="button" onClick={() => {
-                                 if(!productForm.id) return toast.warn("Vui lòng lưu sản phẩm trước khi nhập kho!");
+                                 if(!productForm.id) return toast.warn(t("Vui lòng lưu sản phẩm trước!", "Please save product first!"));
                                  setShowKeyModal({product: productForm, sku: null});
                              }} className="bg-slate-800 text-white px-4 py-2 rounded-lg font-bold hover:bg-slate-900 transition flex items-center gap-2">
-                                 {productForm.is_digital ? <Key size={18}/> : <Package size={18}/>} Nhập kho
+                                 {productForm.is_digital ? <Key size={18}/> : <Package size={18}/>} {t('Nhập kho', 'Import Stock')}
                              </button>
                          </div>
                      </section>
@@ -628,9 +635,9 @@ export default function AdminProducts() {
 
               {/* FOOTER ACTIONS */}
               <div className="p-6 border-t bg-slate-50 rounded-b-2xl flex justify-end gap-3 sticky bottom-0 z-10">
-                  <button type="button" onClick={() => setShowProductModal(false)} className="px-6 py-2.5 text-slate-600 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg font-bold transition">Hủy bỏ</button>
+                  <button type="button" onClick={() => setShowProductModal(false)} className="px-6 py-2.5 text-slate-600 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg font-bold transition">{t('Hủy bỏ', 'Cancel')}</button>
                   <button type="button" onClick={handleSaveProduct} disabled={processing} className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-lg hover:shadow-blue-500/30 transition flex items-center gap-2">
-                      {processing ? 'Đang lưu...' : <><Save size={18}/> Lưu sản phẩm</>}
+                      {processing ? t('Đang lưu...', 'Saving...') : <><Save size={18}/> {t('Lưu sản phẩm', 'Save Product')}</>}
                   </button>
               </div>
            </div>
@@ -648,25 +655,25 @@ export default function AdminProducts() {
                
                {showKeyModal.sku && (
                    <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
-                       <span className="text-xs font-bold text-blue-500 uppercase block mb-1">Đang nhập cho:</span>
+                       <span className="text-xs font-bold text-blue-500 uppercase block mb-1">{t('Đang nhập cho:', 'Importing for:')}</span>
                        <span className="font-bold text-blue-900">{showKeyModal.sku.sku_name}</span>
                    </div>
                )}
 
                {showKeyModal.product.is_digital ? (
                    <div>
-                       <p className="text-xs text-slate-500 mb-2 font-medium uppercase">Danh sách Key (Mỗi dòng 1 key)</p>
+                       <p className="text-xs text-slate-500 mb-2 font-medium uppercase">{t('Danh sách Key (Mỗi dòng 1 key)', 'Key List (One per line)')}</p>
                        <textarea className="w-full border p-3 h-48 rounded-xl font-mono text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="AAAA-BBBB-CCCC&#10;XXXX-YYYY-ZZZZ"></textarea>
                    </div>
                ) : (
                    <div className="bg-orange-50 p-6 rounded-xl border border-orange-100 text-center">
-                       <label className="block text-orange-800 font-bold mb-2">Số lượng thêm vào</label>
+                       <label className="block text-orange-800 font-bold mb-2">{t('Số lượng thêm vào', 'Quantity to add')}</label>
                        <input type="number" className="w-32 border-2 border-orange-200 p-2 rounded-lg text-center font-bold text-3xl focus:border-orange-500 outline-none" value={stockInput} onChange={e => setStockInput(e.target.value)}/>
                    </div>
                )}
                <div className="flex justify-end gap-2 mt-6">
-                   <button onClick={() => setShowKeyModal(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition">Đóng</button>
-                   <button onClick={handleImportStock} className="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 shadow transition">Xác nhận</button>
+                   <button onClick={() => setShowKeyModal(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition">{t('Đóng', 'Close')}</button>
+                   <button onClick={handleImportStock} className="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 shadow transition">{t('Xác nhận', 'Confirm')}</button>
                </div>
             </div>
          </div>
