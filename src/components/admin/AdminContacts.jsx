@@ -164,6 +164,9 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
           <table className="w-full text-left">
             <thead className="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold tracking-wider sticky top-0">
                 <tr>
+                    {/* [UPDATE 1]: Thêm cột ID (Đã chỉnh sửa) */}
+                    <th className="p-4 w-16 text-center">#ID</th>
+                    
                     <th className="p-4">{t('Ngày', 'Date')}</th>
                     <th className="p-4">{role==='admin' ? t('Khách hàng', 'Customer') : t('Chủ đề', 'Subject')}</th>
                     <th className="p-4">{t('Trạng thái', 'Status')}</th>
@@ -173,6 +176,9 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
             <tbody className="divide-y divide-slate-100">
               {contacts.length > 0 ? contacts.map(c => (
                 <tr key={c.id} className={`hover:bg-slate-50 transition cursor-pointer ${c.status === 'new' ? 'bg-blue-50/30' : ''}`} onClick={() => openTicketChat(c)}>
+                    {/* [UPDATE 2]: Hiển thị ID (Đã chỉnh sửa) */}
+                    <td className="p-4 text-center font-bold text-blue-600">#{c.id}</td>
+
                     <td className="p-4 text-sm text-slate-500 whitespace-nowrap">{new Date(c.created_at).toLocaleString()}</td>
                     <td className="p-4">
                         {role === 'admin' ? (
@@ -189,7 +195,8 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
                     <td className="p-4"><button className="text-blue-600 bg-blue-50 p-2 rounded-lg hover:bg-blue-100 transition"><MessageSquare size={18}/></button></td>
                 </tr>
               )) : (
-                  <tr><td colSpan="4" className="p-8 text-center text-slate-400">{t('Chưa có yêu cầu hỗ trợ nào.', 'No support tickets found.')}</td></tr>
+                  // [UPDATE 3]: Sửa colSpan từ 4 thành 5
+                  <tr><td colSpan="5" className="p-8 text-center text-slate-400">{t('Chưa có yêu cầu hỗ trợ nào.', 'No support tickets found.')}</td></tr>
               )}
             </tbody>
           </table>
