@@ -13,7 +13,7 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   
   const [product, setProduct] = useState(null);
-  const [skus, setSkus] = useState([]); // State mới: Lưu danh sách các biến thể con (SKU)
+  const [skus, setSkus] = useState([]); 
   const [mainImg, setMainImg] = useState('');
   
   const [selectedOptions, setSelectedOptions] = useState({});
@@ -25,15 +25,14 @@ export default function ProductDetail() {
   useEffect(() => {
     const fetchData = async () => {
         setLoadingStock(true);
-        // 1. Lấy thông tin sản phẩm cha
-        const { data: prodData, error: prodError } = await supabase.from('products').select('*').eq('id', id).single();
+        const { data: prodData } = await supabase.from('products').select('*').eq('id', id).single();
         
         if (prodData) {
             setProduct(prodData);
             if (prodData.images?.length) setMainImg(prodData.images[0]);
             setFinalPrice(prodData.price);
             
-            // Mặc định chọn option đầu tiên của mỗi nhóm
+            // Default options
             if (prodData.variants && Array.isArray(prodData.variants)) {
                 const defaults = {};
                 prodData.variants.forEach(v => {
@@ -44,7 +43,7 @@ export default function ProductDetail() {
                 setSelectedOptions(defaults);
             }
 
-            // 2. Lấy danh sách các biến thể con (SKU) từ bảng 'product_variants'
+            // Get SKUs
             const { data: skuData } = await supabase
                 .from('product_variants')
                 .select('*')
@@ -59,7 +58,7 @@ export default function ProductDetail() {
     fetchData();
   }, [id]);
 
-  // --- LOGIC CHECK STOCK DIGITAL (RPC) ---
+  // --- CHECK DIGITAL STOCK ---
   const checkDigitalStock = async (prod, options) => {
       setLoadingStock(true);
       try {
@@ -68,13 +67,8 @@ export default function ProductDetail() {
               p_id: prod.id,
               v_info: validOptions
           });
-          
-          if (error) {
-              console.error("Stock check error:", error);
-              setCurrentStock(0);
-          } else {
-              setCurrentStock(count || 0);
-          }
+          if (error) throw error;
+          setCurrentStock(count || 0);
       } catch (err) {
           console.error(err);
           setCurrentStock(0);
@@ -83,57 +77,56 @@ export default function ProductDetail() {
       }
   };
 
-  // --- REACTIVE UI: XỬ LÝ KHI THAY ĐỔI OPTION ---
+  // --- REACTIVE UPDATES ---
   useEffect(() => {
       if (!product) return;
       
-      // 1. Tìm biến thể (SKU) tương ứng trong list đã fetch
       let matchingSku = null;
       if (skus.length > 0) {
           matchingSku = skus.find(sku => {
-              const skuOpts = sku.options; // Cột options trong DB là JSONB
+              const skuOpts = sku.options;
               const selectedKeys = Object.keys(selectedOptions);
-              // So sánh số lượng key và giá trị từng key
               if (Object.keys(skuOpts).length !== selectedKeys.length) return false;
               return selectedKeys.every(key => skuOpts[key] === selectedOptions[key]);
           });
       }
 
-      // 2. Cập nhật Giá (Giá gốc + Price Mod từ SKU)
       const basePrice = product.price;
       const priceMod = matchingSku ? (parseFloat(matchingSku.price_mod) || 0) : 0;
       setFinalPrice(basePrice + priceMod);
 
-      // 3. Cập nhật Hình ảnh (Ưu tiên ảnh của SKU nếu có)
+      // Lưu ý: Chỉ update ảnh chính nếu người dùng chưa tự chọn ảnh khác, hoặc muốn đồng bộ ảnh theo option.
+      // Ở đây ta ưu tiên: Nếu biến thể có ảnh -> Hiển thị ảnh đó.
       if (matchingSku && matchingSku.image) {
           setMainImg(matchingSku.image);
       }
 
-      // 4. Cập nhật Tồn kho
       if (product.is_digital) {
-          // Nếu là Digital: Gọi RPC check key
           checkDigitalStock(product, selectedOptions);
       } else {
-          // Nếu là Vật lý: Lấy trực tiếp stock từ SKU hoặc Sản phẩm cha
           if (product.variants && product.variants.length > 0) {
-              // Có biến thể -> Lấy stock của SKU tìm thấy
               setCurrentStock(matchingSku ? matchingSku.stock : 0);
           } else {
-              // Không biến thể -> Lấy stock chung
               setCurrentStock(product.physical_stock || 0);
           }
       }
 
   }, [selectedOptions, product, skus]);
 
-  // Handle click option (Chỉ update state, logic xử lý nằm ở useEffect trên)
+  // --- HANDLERS ---
   const handleOptionChange = (variantName, value) => {
       setSelectedOptions(prev => ({ ...prev, [variantName]: value }));
   };
 
-  // Tạo object để thêm vào giỏ hàng
+  // ĐÃ FIX: Click vào Thumbnail -> Set Main Image VÀ Set Selected Options
+  const handleThumbnailClick = (img, skuOptions) => {
+      setMainImg(img);
+      if (skuOptions) {
+          setSelectedOptions(skuOptions);
+      }
+  };
+
   const getProductToAdd = () => {
-      // Tìm SKU ID nếu có
       let matchingSku = null;
       if(skus.length > 0) {
           matchingSku = skus.find(sku => JSON.stringify(sku.options) === JSON.stringify(selectedOptions));
@@ -141,10 +134,10 @@ export default function ProductDetail() {
 
       return { 
         ...product, 
-        price: finalPrice, // Giá đã tính toán
+        price: finalPrice, 
         selectedVariants: selectedOptions,
-        variantId: matchingSku ? matchingSku.id : null, // Lưu thêm ID biến thể để dễ xử lý về sau
-        image: mainImg, // Lưu ảnh hiện tại vào giỏ (để hiển thị đúng màu khách chọn)
+        variantId: matchingSku ? matchingSku.id : null, 
+        image: mainImg, 
         maxStock: currentStock 
       };
   };
@@ -161,7 +154,7 @@ export default function ProductDetail() {
       const currentQty = currentCartItem ? currentCartItem.quantity : 0;
       
       if (!product.allow_external_key && (currentQty + 1 > currentStock)) {
-          return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left in stock.`));
+          return toast.warn(t(`Kho chỉ còn ${currentStock} sản phẩm.`, `Only ${currentStock} left.`));
       }
 
       if(product) { 
@@ -189,7 +182,7 @@ export default function ProductDetail() {
       }
   }
 
-  if (!product) return <div className="flex justify-center items-center h-64 text-slate-400">Loading...</div>;
+  if (!product) return <div className="flex justify-center items-center h-64 text-slate-400">{t('Đang tải...', 'Loading...')}</div>;
 
   const displayTitle = lang === 'vi' ? product.title : (product.title_en || product.title);
   const displayDesc = lang === 'vi' ? product.description : (product.description_en || product.description);
@@ -197,27 +190,27 @@ export default function ProductDetail() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 md:flex gap-10">
-        {/* LEFT COLUMN: IMAGES */}
+        {/* LEFT: IMAGES */}
         <div className="md:w-1/2 flex flex-col gap-4">
           <div className="h-80 md:h-96 bg-gray-50 rounded-2xl overflow-hidden border border-slate-100 flex items-center justify-center p-4 relative group">
             <img src={mainImg} alt={displayTitle} className="w-full h-full object-contain hover:scale-105 transition duration-500" />
           </div>
-          {/* Thumbnails list: Includes Product Images AND Variant Images */}
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-              {/* Ảnh gốc của sản phẩm */}
+              {/* Ảnh chung (Click chỉ đổi ảnh) */}
               {product.images?.map((img, idx) => (
-                <img key={`prod-${idx}`} src={img} onClick={() => setMainImg(img)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === img ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} />
+                <img key={`prod-${idx}`} src={img} onClick={() => handleThumbnailClick(img, null)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === img ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} />
               ))}
-              {/* Ảnh từ các biến thể (nếu có và khác ảnh gốc) */}
+              
+              {/* Ảnh biến thể (Click đổi ảnh + chọn option) */}
               {skus.filter(s => s.image).map((s, idx) => (
                  !product.images?.includes(s.image) && (
-                    <img key={`sku-${idx}`} src={s.image} onClick={() => setMainImg(s.image)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === s.image ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} title={s.sku_name}/>
+                    <img key={`sku-${idx}`} src={s.image} onClick={() => handleThumbnailClick(s.image, s.options)} className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 transition ${mainImg === s.image ? 'border-blue-600 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'}`} title={s.sku_name}/>
                  )
               ))}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: INFO */}
+        {/* RIGHT: INFO */}
         <div className="md:w-1/2 mt-8 md:mt-0 flex flex-col">
           <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4 leading-tight">{displayTitle}</h1>
           <div className="flex items-center gap-4 mb-6">
@@ -227,15 +220,15 @@ export default function ProductDetail() {
 
           <div className={`mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${!isOutOfStock ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
               {loadingStock ? (
-                  <span className="animate-pulse">Updating stock...</span>
+                  <span className="animate-pulse">{t('Đang kiểm tra kho...', 'Checking stock...')}</span>
               ) : !isOutOfStock ? (
-                  <><CheckCircle size={16}/> {product.allow_external_key && currentStock <=0 ? t('Sẵn hàng', 'In Stock') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
+                  <><CheckCircle size={16}/> {product.allow_external_key && currentStock <=0 ? t('Sẵn hàng (Auto)', 'In Stock (Auto)') : `${t('Sẵn hàng', 'In Stock')}: ${currentStock}`}</>
               ) : (
                   <><AlertTriangle size={16}/> {t('Hết hàng', 'Out of Stock')}</>
               )}
           </div>
 
-          {/* VARIANT SELECTORS */}
+          {/* VARIANTS */}
           {product.variants && product.variants.length > 0 && (
               <div className="mb-6 space-y-4 p-5 bg-slate-50 rounded-xl border border-slate-100">
                   {product.variants.map((variant, idx) => (
@@ -245,10 +238,6 @@ export default function ProductDetail() {
                               {variant.options.map((opt, optIdx) => {
                                   const displayLabel = lang === 'vi' ? opt.label : (opt.label_en || opt.label);
                                   const isSelected = selectedOptions[variant.name] === opt.label; 
-                                  
-                                  // Kiểm tra xem option này có làm thay đổi giá không? (Chỉ mang tính chất gợi ý, vì giá thực nằm ở tổ hợp cuối)
-                                  // Tuy nhiên để đơn giản UI, ta không hiển thị +$ ở đây nữa vì giá nhảy ở trên rồi.
-                                  
                                   return (
                                       <button key={optIdx} onClick={() => handleOptionChange(variant.name, opt.label)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
                                           {displayLabel}
