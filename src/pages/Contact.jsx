@@ -1,93 +1,81 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { useTranslation } from 'react-i18next'; // Giữ nguyên thư viện gốc của bạn
-import { Link } from 'react-router-dom';
+import { useLang } from '../context/LangContext';
+import { Send, RefreshCw, MapPin, Phone, Mail, Calculator, Lock, MessageSquare } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import AdminContacts from '../components/admin/AdminContacts';
 
-const Contact = () => {
-  const { t, i18n } = useTranslation(); // Giữ nguyên hook gốc
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    message: '',
-    captchaInput: ''
-  });
+export default function Contact() {
+  // [UPDATE 1] Lấy thêm biến lang để gửi xuống server
+  const { t, lang } = useLang(); 
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', message: '', captchaInput: '' });
+  const [settings, setSettings] = useState({}); 
+  const [mathProblem, setMathProblem] = useState({ a: 0, b: 0, result: 0 });
   const [loading, setLoading] = useState(false);
-  const [mathProblem, setMathProblem] = useState({ text: '', result: 0 });
+  
+  // State quản lý View
   const [session, setSession] = useState(null);
-  const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
-
-  // Tạo phép tính Captcha
-  const generateMathCaptcha = () => {
-    const num1 = Math.floor(Math.random() * 10) + 1;
-    const num2 = Math.floor(Math.random() * 10) + 1;
-    setMathProblem({ text: `${num1} + ${num2} = ?`, result: num1 + num2 });
-  };
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-    generateMathCaptcha();
-    
-    // Lấy Session và load lịch sử
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) {
-        setFormData(prev => ({
-          ...prev,
-          name: session.user.user_metadata?.full_name || '',
-          email: session.user.email || ''
-        }));
-        fetchHistory(session.user.id);
-        setShowHistory(true);
-      }
-    });
+      // 1. Lấy Settings
+      supabase.from('site_settings').select('*').eq('is_public', true)
+        .then(({ data }) => {
+            const conf = {}; data?.forEach(i => conf[i.key] = i.value);
+            setSettings(conf);
+        });
+      
+      // 2. Tạo Math Captcha
+      generateMathCaptcha();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
-         fetchHistory(session.user.id);
-         setShowHistory(true);
-      } else {
-         setHistory([]);
-         setShowHistory(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+      // 3. Check Login & Auto-fill
+      const checkUser = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+              setSession({ user });
+              setFormData(prev => ({
+                  ...prev,
+                  email: user.email, 
+                  name: user.user_metadata?.full_name || prev.name
+              }));
+          }
+      };
+      checkUser();
   }, []);
 
-  const fetchHistory = async (userId) => {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    
-    if (!error && data) setHistory(data);
-  };
+  // 4. Tự động chuyển tab nếu có ticketId trên URL
+  useEffect(() => {
+      const ticketId = searchParams.get('ticketId');
+      if (ticketId && session) {
+          setShowHistory(true);
+      }
+  }, [searchParams, session]);
 
-  const handleChange = (e) => {
-    setFormData({...formData, [e.target.name]: e.target.value});
+  const generateMathCaptcha = () => {
+    const a = Math.floor(Math.random() * 10) + 1; 
+    const b = Math.floor(Math.random() * 10) + 1;
+    setMathProblem({ a, b, result: a + b });
+    setFormData(prev => ({ ...prev, captchaInput: '' }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (parseInt(formData.captchaInput) !== mathProblem.result) {
-        return alert(t("Kết quả phép tính sai!", "Incorrect captcha answer!"));
+        return alert(t("Kết quả phép tính sai!", "Incorrect answer!"));
     }
 
     setLoading(true);
     try {
-        // [QUAN TRỌNG] Chỉ thêm đúng dòng language này vào payload
+        // [UPDATE 2] Gửi kèm user_id và language
         const { data, error } = await supabase.functions.invoke('contact-handler', {
             body: { 
                 name: formData.name, 
                 email: formData.email, 
                 phone: formData.phone, 
                 message: formData.message,
-                user_id: session?.user?.id || null, 
-                language: i18n.language // Lấy ngôn ngữ hiện tại ('vi', 'en'...) gửi lên Server
+                user_id: session?.user?.id || null, // Cần cái này để SQL biết là user nào
+                language: lang // Cần cái này để SQL biết gửi thông báo tiếng gì ('vi' hay 'en')
             }
         });
 
@@ -96,15 +84,14 @@ const Contact = () => {
 
         alert(t("Gửi thành công! Chúng tôi sẽ liên hệ sớm.", "Sent successfully! We will contact you soon."));
         
-        // Reset form & Refresh history
+        // Reset form
         if (session) {
             setFormData(prev => ({ ...prev, message: '', phone: '', captchaInput: '' }));
-            fetchHistory(session.user.id);
+            setShowHistory(true); 
         } else {
             setFormData({ name: '', email: '', phone: '', message: '', captchaInput: '' });
         }
         generateMathCaptcha();
-
     } catch (err) {
         alert(t("Lỗi gửi tin: ", "Error sending: ") + err.message);
     } finally {
@@ -112,131 +99,165 @@ const Contact = () => {
     }
   };
 
-  return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <h1 className="text-3xl font-bold mb-6 text-center text-blue-600 uppercase">
-        {t("Liên hệ & Hỗ trợ", "Contact & Support")}
-      </h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* FORM LIÊN HỆ */}
-        <div className="bg-white p-6 shadow rounded-lg">
-          <h2 className="text-xl font-semibold mb-4">{t("Gửi yêu cầu", "Submit Request")}</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-gray-700">{t("Họ tên", "Full Name")}</label>
-              <input type="text" name="name" required 
-                value={formData.name} onChange={handleChange}
-                className="w-full border p-2 rounded focus:ring focus:ring-blue-200" />
-            </div>
-            
-            <div>
-              <label className="block text-gray-700">Email</label>
-              <input type="email" name="email" required 
-                value={formData.email} onChange={handleChange}
-                disabled={!!session} // Không cho sửa email nếu đã login
-                className="w-full border p-2 rounded focus:ring focus:ring-blue-200 disabled:bg-gray-100" />
-            </div>
-
-            <div>
-              <label className="block text-gray-700">{t("Số điện thoại", "Phone Number")}</label>
-              <input type="tel" name="phone" required 
-                value={formData.phone} onChange={handleChange}
-                className="w-full border p-2 rounded focus:ring focus:ring-blue-200" />
-            </div>
-
-            <div>
-              <label className="block text-gray-700">{t("Nội dung cần hỗ trợ", "Message")}</label>
-              <textarea name="message" required rows="4"
-                value={formData.message} onChange={handleChange}
-                className="w-full border p-2 rounded focus:ring focus:ring-blue-200"></textarea>
-            </div>
-
-            {/* Captcha */}
-            <div>
-               <label className="block text-gray-700 font-medium">
-                 {t("Phép tính xác thực", "Security Question")}: {mathProblem.text}
-               </label>
-               <input type="number" name="captchaInput" required
-                 value={formData.captchaInput} onChange={handleChange}
-                 className="w-full border p-2 rounded focus:ring focus:ring-blue-200" 
-                 placeholder="?" />
-            </div>
-
-            <button type="submit" disabled={loading}
-              className={`w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              {loading ? t("Đang gửi...", "Sending...") : t("Gửi yêu cầu", "Submit")}
-            </button>
-          </form>
-        </div>
-
-        {/* THÔNG TIN & LỊCH SỬ */}
-        <div className="space-y-6">
-          {/* Thông tin liên hệ tĩnh */}
-          <div className="bg-blue-50 p-6 rounded-lg border border-blue-100">
-            <h2 className="text-lg font-bold text-blue-800 mb-2">{t("Thông tin liên hệ", "Contact Info")}</h2>
-            <ul className="space-y-2 text-gray-700">
-              <li>📍 <b>Address:</b> 123 Street, Hanoi, Vietnam</li>
-              <li>📧 <b>Email:</b> support@autoshop.pro</li>
-              <li>📞 <b>Hotline:</b> 0901.234.567</li>
-              <li>⏰ <b>Work time:</b> 8:00 - 22:00 (Daily)</li>
-            </ul>
+  // --- VIEW 1: LỊCH SỬ HỖ TRỢ ---
+  if (showHistory && session) {
+      return (
+          <div className="container mx-auto py-10 px-4 min-h-[80vh]">
+               <div className="flex justify-between items-center mb-6 max-w-5xl mx-auto">
+                    <h1 className="text-2xl font-bold text-slate-800">{t('Trung tâm hỗ trợ', 'Support Center')}</h1>
+                    <button 
+                        onClick={() => {
+                            setShowHistory(false);
+                            setSearchParams({}); 
+                        }} 
+                        className="text-blue-600 font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition"
+                    >
+                        {t('← Quay lại gửi yêu cầu', '← Back to New Request')}
+                    </button>
+               </div>
+               <div className="max-w-5xl mx-auto h-[700px]">
+                    <AdminContacts 
+                        session={session} 
+                        role="user" 
+                        activeTicketId={searchParams.get('ticketId')}
+                        onNewTicket={() => {
+                            setShowHistory(false);
+                            setSearchParams({});
+                        }}
+                    />
+               </div>
           </div>
+      );
+  }
 
-          {/* Lịch sử Hỗ trợ (Chỉ hiện khi login) */}
-          {showHistory && (
-             <div className="bg-white p-6 shadow rounded-lg">
-                <h2 className="text-xl font-semibold mb-4">{t("Lịch sử hỗ trợ của bạn", "Your Support History")}</h2>
-                {history.length === 0 ? (
-                    <p className="text-gray-500">{t("Bạn chưa gửi yêu cầu nào.", "No requests found.")}</p>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm text-left">
-                            <thead className="bg-gray-100">
-                                <tr>
-                                    <th className="py-2 px-3 border-b text-center w-12">#ID</th>
-                                    <th className="py-2 px-3 border-b">{t("Ngày", "Date")}</th>
-                                    <th className="py-2 px-3 border-b">{t("Nội dung", "Message")}</th>
-                                    <th className="py-2 px-3 border-b">{t("Trạng thái", "Status")}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {history.map((item) => (
-                                    <tr key={item.id} className="border-b hover:bg-gray-50">
-                                        <td className="py-2 px-3 text-center font-bold text-gray-600">
-                                            #{item.id}
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            {new Date(item.created_at).toLocaleDateString('vi-VN')}
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            <div className="truncate w-32" title={item.message}>{item.message}</div>
-                                            {(item.status === 'replied' || item.status === 'processed') ? (
-                                                <Link to={`/contact?ticketId=${item.id}`} className="text-xs text-blue-600 hover:underline block mt-1">
-                                                    {t("Xem trả lời", "View Reply")}
-                                                </Link>
-                                            ) : null}
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            <span className={`px-2 py-1 rounded text-xs font-semibold
-                                                ${item.status === 'new' ? 'bg-yellow-100 text-yellow-800' : 
-                                                  item.status === 'replied' || item.status === 'processed' ? 'bg-green-100 text-green-800' : 'bg-gray-100'}`}>
-                                                {item.status === 'new' ? t("Đang chờ", "Pending") : 
-                                                 item.status === 'processed' ? t("Đã xử lý", "Replied") : item.status}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+  // --- VIEW 2: FORM LIÊN HỆ (GIAO DIỆN GỐC) ---
+  return (
+    <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-lg overflow-hidden md:flex my-10 border border-gray-100">
+        {/* Nút Xem lịch sử (Chỉ hiện khi login) */}
+        {session && (
+             <div className="absolute top-4 right-4 md:right-auto md:left-4 z-50">
              </div>
-          )}
+        )}
+
+        {/* === CỘT TRÁI === */}
+        <div className="bg-blue-600 text-white p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-32 h-32 bg-blue-500 rounded-full opacity-50 blur-2xl pointer-events-none"></div>
+            
+            <div className="relative z-10">
+                <h2 className="text-2xl font-bold mb-8 flex items-center gap-2">
+                    <Mail className="opacity-80"/> {t('Liên hệ', 'Contact Us')}
+                </h2>
+                
+                <div className="space-y-6 text-sm">
+                    <div className="flex gap-4 items-start group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><MapPin size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">{t('Địa chỉ', 'Address')}</p>
+                            <p className="font-medium leading-relaxed">{settings.contact_address || 'Hà Nội, Việt Nam'}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Send size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">Telegram</p>
+                            <a href={`https://t.me/${settings.contact_telegram?.replace('@','')}`} target="_blank" rel="noreferrer" className="font-medium hover:text-blue-100 transition">
+                                {settings.contact_telegram || '@support'}
+                            </a>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Phone size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">{t('Hotline', 'Phone')}</p>
+                            <a href={`tel:${settings.contact_phone}`} className="font-medium hover:text-blue-100 transition">{settings.contact_phone || '0988.888.888'}</a>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 items-center group">
+                        <div className="p-2 bg-blue-500 rounded-xl group-hover:bg-blue-400 transition"><Mail size={18} className="text-white"/></div>
+                        <div>
+                            <p className="opacity-70 text-xs uppercase font-bold mb-1">Email</p>
+                            <a href={`mailto:${settings.contact_email}`} className="font-medium hover:text-blue-100 transition">{settings.contact_email || 'support@anvu.vn'}</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-10 pt-6 border-t border-blue-500 text-xs text-blue-100 text-center relative z-10">
+                <p>{t('Hỗ trợ 24/7 qua Telegram', '24/7 Support via Telegram')}</p>
+            </div>
         </div>
-      </div>
+
+        {/* === CỘT PHẢI === */}
+        <div className="p-8 md:w-2/3 relative">
+            {session && (
+                <button onClick={() => setShowHistory(true)} className="absolute top-6 right-6 flex items-center gap-2 text-blue-600 font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition text-xs">
+                    <MessageSquare size={16}/> {t('Lịch sử Hỗ trợ', 'History')}
+                </button>
+            )}
+
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">{t('Gửi yêu cầu hỗ trợ', 'Send Request')}</h2>
+            <p className="text-slate-500 text-sm mb-6">{t('Vui lòng điền thông tin bên dưới, chúng tôi sẽ phản hồi sớm nhất.', 'Please fill out the form below, we will reply shortly.')}</p>
+            
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Họ và tên', 'Full Name')}</label>
+                        <input required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
+                            placeholder={t("Nhập tên của bạn...", "Enter your name...")} 
+                            value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})}/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Số điện thoại', 'Phone Number')}</label>
+                        <input required className="w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white" 
+                            placeholder={t("Nhập số điện thoại...", "Enter phone number...")} 
+                            value={formData.phone} onChange={e=>setFormData({...formData, phone: e.target.value})}/>
+                    </div>
+                </div>
+                
+                <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">Email</label>
+                    <div className="relative">
+                        <input type="email" required 
+                            className={`w-full border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-slate-50 focus:bg-white`}
+                            placeholder="example@gmail.com" 
+                            value={formData.email} 
+                            onChange={e => setFormData({...formData, email: e.target.value})}
+                        />
+                        {session && <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 opacity-50" />}
+                    </div>
+                    {session && <p className="text-[10px] text-blue-600 mt-1 italic">
+                        {t("Email đã được tự động điền từ tài khoản của bạn. Bạn có thể thay đổi nếu cần liên hệ qua email khác.", "Email auto-filled. You can change it if needed.")}
+                    </p>}
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase">{t('Nội dung', 'Message')}</label>
+                    <textarea required className="w-full border border-gray-200 p-3 rounded-xl h-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition resize-none bg-slate-50 focus:bg-white" 
+                        placeholder={t("Bạn cần hỗ trợ vấn đề gì?", "How can we help you?")} 
+                        value={formData.message} onChange={e=>setFormData({...formData, message: e.target.value})}></textarea>
+                </div>
+                
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center gap-3 font-bold text-blue-700 bg-white px-4 py-2 rounded-lg border shadow-sm select-none">
+                        <Calculator size={20} className="text-blue-600"/> 
+                        <span className="text-lg tracking-wide">{mathProblem.a} + {mathProblem.b} = ?</span>
+                    </div>
+                    <button type="button" onClick={generateMathCaptcha} className="p-2 text-gray-400 hover:text-blue-600 bg-white rounded-full border hover:border-blue-400 transition" title={t('Đổi câu hỏi', 'Refresh')}>
+                        <RefreshCw size={18}/>
+                    </button>
+                    <input required type="number" className="border border-gray-300 p-2 rounded-lg w-32 text-center font-bold text-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                        placeholder={t('Kết quả', 'Result')} 
+                        value={formData.captchaInput} onChange={e=>setFormData({...formData, captchaInput: e.target.value})}/>
+                </div>
+
+                <button disabled={loading} className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200 flex justify-center items-center gap-2 transform active:scale-[0.99]">
+                    {loading ? t('Đang gửi...', 'Sending...') : <><Send size={18}/> {t('Gửi Yêu Cầu', 'Send Message')}</>}
+                </button>
+            </form>
+        </div>
     </div>
   );
-};
-
-export default Contact;
+}
