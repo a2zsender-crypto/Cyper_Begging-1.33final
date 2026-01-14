@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2, Save, AlertCircle } from 'lucide-react';
+import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2, Save, AlertCircle, Globe } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
@@ -29,7 +29,7 @@ export default function AdminProducts() {
     description: '', description_en: '', is_digital: true, 
     physical_stock: 0, images: [], 
     variants: [], 
-    allow_external_key: false 
+    allow_external_key: false // Biến này đã có trong state, chỉ thiếu UI
   });
   
   // State quản lý danh sách các biến thể chi tiết (SKUs)
@@ -70,12 +70,12 @@ export default function AdminProducts() {
     
     if(validVariants.length > 0) {
         const combos = generateCombinations(validVariants);
-        // Merge logic: Giữ lại data cũ nếu option trùng khớp
+        // Merge logic
         const mergedSkus = combos.map(combo => {
             const existing = skuList.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
             if (existing) return existing;
             return {
-                id: null, // Mới tạo chưa có ID
+                id: null,
                 options: combo,
                 sku_name: Object.values(combo).join(' - '),
                 stock: 0,
@@ -85,7 +85,6 @@ export default function AdminProducts() {
             };
         });
         
-        // Chỉ update nếu có sự thay đổi về cấu trúc options
         if (JSON.stringify(mergedSkus.map(s => s.options)) !== JSON.stringify(skuList.map(s => s.options))) {
              setSkuList(mergedSkus);
         }
@@ -100,7 +99,7 @@ export default function AdminProducts() {
       if(!error && data) setSkuList(data);
   };
 
-  // --- HANDLERS UI (Giữ nguyên logic thao tác) ---
+  // --- HANDLERS UI ---
   const addVariantGroup = () => setProductForm(prev => ({ ...prev, variants: [...(prev.variants || []), { name: '', options: [] }] }));
   const removeVariantGroup = (idx) => setProductForm(prev => { const n = [...prev.variants]; n.splice(idx, 1); return { ...prev, variants: n }; });
   const updateVariantName = (idx, val) => setProductForm(prev => { const n = [...prev.variants]; n[idx].name = val; return { ...prev, variants: n }; });
@@ -125,7 +124,7 @@ export default function AdminProducts() {
           if(error) throw error;
           const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
           updateSkuField(index, 'image', data.publicUrl);
-          toast.success("Upload ảnh biến thể xong!");
+          toast.success(t("Upload ảnh biến thể xong!", "Variant image uploaded!"));
       } catch (err) { toast.error(err.message); } finally { setSkuUploading(null); }
   };
 
@@ -139,7 +138,7 @@ export default function AdminProducts() {
           if(error) throw error;
           const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
           setProductForm(prev => ({ ...prev, images: [...(prev.images || []), data.publicUrl] }));
-          toast.success("Upload ảnh thành công!");
+          toast.success(t("Upload ảnh thành công!", "Image uploaded!"));
       } catch (err) { toast.error(err.message); } finally { setUploading(false); }
   };
   const handleRemoveImage = (idx) => setProductForm(prev => ({...prev, images: prev.images.filter((_, i) => i !== idx)}));
@@ -167,7 +166,7 @@ export default function AdminProducts() {
       setShowProductModal(true);
   };
 
-  // --- SAVE PRODUCT (QUAN TRỌNG: FIX LỖI ID NULL) ---
+  // --- SAVE PRODUCT ---
   const handleSaveProduct = async (e) => {
       e.preventDefault();
       setProcessing(true);
@@ -179,7 +178,7 @@ export default function AdminProducts() {
               description: productForm.description, description_en: productForm.description_en,
               images: productForm.images, is_digital: productForm.is_digital,
               variants: productForm.variants, 
-              allow_external_key: productForm.allow_external_key
+              allow_external_key: productForm.allow_external_key // Đã lưu vào DB
           };
           
           if (!productForm.variants || productForm.variants.length === 0) {
@@ -196,7 +195,7 @@ export default function AdminProducts() {
               productId = data.id;
           }
 
-          // 2. Lưu Variants (FIX LỖI TẠI ĐÂY)
+          // 2. Lưu Variants
           if (productForm.variants && productForm.variants.length > 0 && skuList.length > 0) {
                // A. Cleanup
                const { data: existingVariants } = await supabase.from('product_variants').select('id').eq('product_id', productId);
@@ -216,7 +215,6 @@ export default function AdminProducts() {
                        image: sku.image,
                        is_active: true
                    };
-                   // CHỈ thêm ID vào object nếu nó tồn tại (khác null)
                    if (sku.id) record.id = sku.id; 
                    return record;
                });
@@ -229,7 +227,7 @@ export default function AdminProducts() {
           queryClient.invalidateQueries({ queryKey: ['admin-products'] });
           toast.success(t("Lưu thành công!", "Saved successfully!"));
       } catch (err) { 
-          toast.error("Lỗi: " + err.message); 
+          toast.error(t("Lỗi: ", "Error: ") + err.message); 
       } finally {
           setProcessing(false);
       }
@@ -252,7 +250,7 @@ export default function AdminProducts() {
             const insertData = codes.map(code => ({ product_id: currentProd.id, key_value: code.trim(), variant_info: variantInfo, is_used: false }));
             const { error } = await supabase.from('product_keys').insert(insertData);
             if (error) throw error;
-            toast.success(`Đã thêm ${insertData.length} Keys!`);
+            toast.success(t(`Đã thêm ${insertData.length} Keys!`, `Added ${insertData.length} Keys!`));
 
             if (targetSku && targetSku.id) {
                  const newStock = (parseInt(targetSku.stock) || 0) + insertData.length;
@@ -262,7 +260,7 @@ export default function AdminProducts() {
             }
         } else {
             const qtyToAdd = parseInt(stockInput);
-            if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn("Số lượng > 0");
+            if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn(t("Số lượng > 0", "Qty > 0"));
             if (targetSku) {
                 const newStock = (parseInt(targetSku.stock) || 0) + qtyToAdd;
                 const { error } = await supabase.from('product_variants').update({ stock: newStock }).eq('id', targetSku.id);
@@ -274,11 +272,11 @@ export default function AdminProducts() {
                 const newStock = (latest.physical_stock || 0) + qtyToAdd;
                 await supabase.from('products').update({ physical_stock: newStock }).eq('id', currentProd.id);
             }
-            toast.success("Cập nhật kho thành công!");
+            toast.success(t("Cập nhật kho thành công!", "Stock updated!"));
         }
         setKeyInput(''); setStockInput(0); setShowKeyModal(null);
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
-    } catch (err) { toast.error("Lỗi: " + err.message); }
+    } catch (err) { toast.error(t("Lỗi: ", "Error: ") + err.message); }
   };
 
   if (isLoading) return <div className="p-8 text-center text-slate-500">{t('Đang tải...', 'Loading...')}</div>;
@@ -288,7 +286,7 @@ export default function AdminProducts() {
        <div className="flex justify-between mb-6 items-center">
          <div>
              <h2 className="text-2xl font-bold text-slate-800">{t('Kho Sản Phẩm', 'Inventory')}</h2>
-             <p className="text-sm text-slate-500">Quản lý sản phẩm và biến thể</p>
+             <p className="text-sm text-slate-500">{t('Quản lý sản phẩm và biến thể', 'Manage products and variants')}</p>
          </div>
          <button onClick={openAddModal} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow hover:bg-blue-700 transition"><Plus size={18}/> {t('Thêm Mới', 'Add New')}</button>
        </div>
@@ -314,19 +312,19 @@ export default function AdminProducts() {
                     </div>
                     <div>
                         <span className="font-medium text-sm text-slate-700 block">{lang === 'vi' ? p.title : (p.title_en || p.title)}</span>
-                        {hasVariants && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 inline-block mt-1">Đa biến thể</span>}
+                        {hasVariants && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 inline-block mt-1">{t('Đa biến thể', 'Multi-variants')}</span>}
                     </div>
                  </td>
                  <td className="p-4 text-xs font-medium text-slate-500">{p.is_digital ? 'Digital' : 'Physical'}</td>
                  <td className="p-4 text-center">
                      <span className={`px-2 py-1 rounded-md text-xs font-bold ${p.physical_stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {hasVariants ? 'Check Detail' : (p.physical_stock || 0)}
+                        {hasVariants ? t('Xem chi tiết', 'Check Detail') : (p.physical_stock || 0)}
                      </span>
                  </td>
                  <td className="p-4 text-right flex justify-end gap-2">
-                    <button onClick={()=>openEditModal(p)} className="p-2 bg-slate-100 rounded hover:bg-blue-100 text-blue-600 transition"><Edit size={16}/></button>
+                    <button onClick={()=>openEditModal(p)} className="p-2 bg-slate-100 rounded hover:bg-blue-100 text-blue-600 transition" title={t("Sửa", "Edit")}><Edit size={16}/></button>
                     {!hasVariants && (
-                        <button onClick={()=>setShowKeyModal({product: p, variant: null})} className="p-2 bg-slate-100 rounded hover:bg-green-100 text-green-600 transition"><Plus size={16}/></button>
+                        <button onClick={()=>setShowKeyModal({product: p, variant: null})} className="p-2 bg-slate-100 rounded hover:bg-green-100 text-green-600 transition" title={t("Nhập kho", "Stock")}><Plus size={16}/></button>
                     )}
                  </td>
                </tr>
@@ -348,39 +346,47 @@ export default function AdminProducts() {
                  {/* BASIC INFO */}
                  <div className="grid grid-cols-2 gap-5">
                    <div>
-                       <label className="block text-sm font-bold mb-1.5 text-slate-600">Tên sản phẩm (VN)</label>
+                       <label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Tên sản phẩm (VN)', 'Product Name (VN)')}</label>
                        <input required className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.title} onChange={e=>setProductForm({...productForm, title: e.target.value})}/>
                    </div>
                    <div>
-                       <label className="block text-sm font-bold mb-1.5 text-slate-600">Tên (EN - Optional)</label>
+                       <label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Tên (EN - Optional)', 'Name (EN)')}</label>
                        <input className="w-full border p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" value={productForm.title_en} onChange={e=>setProductForm({...productForm, title_en: e.target.value})}/>
                    </div>
                  </div>
                  <div className="grid grid-cols-2 gap-5">
                    <div>
-                       <label className="block text-sm font-bold mb-1.5 text-slate-600">Giá ($ USDT)</label>
+                       <label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Giá ($ USDT)', 'Price (USDT)')}</label>
                        <input type="number" step="0.01" required className="w-full border p-2.5 rounded-lg font-mono font-bold text-green-600 focus:ring-2 focus:ring-blue-500 outline-none" value={productForm.price} onChange={e=>setProductForm({...productForm, price: e.target.value})}/>
                    </div>
                    <div>
-                         <label className="block text-sm font-bold mb-1.5 text-slate-600">Loại</label>
+                         <label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Loại sản phẩm', 'Product Type')}</label>
                          <select className="w-full border p-2.5 rounded-lg outline-none bg-white" value={productForm.is_digital ? 'digital' : 'physical'} onChange={e => setProductForm({...productForm, is_digital: e.target.value === 'digital'})}>
                              <option value="digital">Digital (Key)</option>
                              <option value="physical">Physical (Ship)</option>
                          </select>
+                         
+                         {/* --- KHÔI PHỤC TÍNH NĂNG GET CODE API --- */}
+                         {productForm.is_digital && (
+                             <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                                 <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={productForm.allow_external_key} onChange={e => setProductForm({...productForm, allow_external_key: e.target.checked})}/>
+                                 <span className="text-xs font-bold text-blue-600 hover:text-blue-800 transition">{t('Lấy code qua API (Appota) khi hết kho', 'Get code via API if OOS')}</span>
+                             </label>
+                         )}
                     </div>
                  </div>
 
                  {/* DESCRIPTION */}
                  <div className="grid grid-cols-2 gap-5">
-                     <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Mô tả (VN)</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none outline-none" value={productForm.description} onChange={e=>setProductForm({...productForm, description: e.target.value})}></textarea></div>
-                     <div><label className="block text-sm font-bold mb-1.5 text-slate-600">Mô tả (EN)</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none outline-none bg-slate-50" value={productForm.description_en} onChange={e=>setProductForm({...productForm, description_en: e.target.value})}></textarea></div>
+                     <div><label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Mô tả (VN)', 'Description (VN)')}</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none outline-none" value={productForm.description} onChange={e=>setProductForm({...productForm, description: e.target.value})}></textarea></div>
+                     <div><label className="block text-sm font-bold mb-1.5 text-slate-600">{t('Mô tả (EN)', 'Description (EN)')}</label><textarea className="w-full border p-2.5 rounded-lg h-20 resize-none outline-none bg-slate-50" value={productForm.description_en} onChange={e=>setProductForm({...productForm, description_en: e.target.value})}></textarea></div>
                  </div>
 
                  {/* VARIANT CONFIG */}
                  <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                     <div className="flex justify-between items-center mb-3">
                         <label className="block text-sm font-bold text-slate-700 flex items-center gap-2"><Settings size={16}/> {t('Cấu hình biến thể', 'Variant Config')}</label>
-                        <button type="button" onClick={addVariantGroup} className="text-xs bg-white border hover:bg-slate-100 px-3 py-1.5 rounded-lg font-bold transition shadow-sm">+ Thêm nhóm</button>
+                        <button type="button" onClick={addVariantGroup} className="text-xs bg-white border hover:bg-slate-100 px-3 py-1.5 rounded-lg font-bold transition shadow-sm">{t('+ Thêm nhóm', '+ Add Group')}</button>
                     </div>
                     <div className="space-y-3">
                         {productForm.variants?.map((group, gIdx) => (
@@ -406,18 +412,18 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* SKU MATRIX (NEW UI integrated into OLD style) */}
+                    {/* SKU MATRIX */}
                     {productForm.variants.length > 0 && skuList.length > 0 && (
                         <div className="mt-4 border-t pt-4">
-                            <label className="block text-sm font-bold text-slate-700 mb-2">Chi tiết biến thể (Giá & Ảnh)</label>
+                            <label className="block text-sm font-bold text-slate-700 mb-2">{t('Chi tiết biến thể (Giá & Ảnh)', 'Variant Details')}</label>
                             <div className="overflow-x-auto rounded border border-slate-200 bg-white">
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-slate-100 text-xs uppercase text-slate-500 font-bold">
                                         <tr>
-                                            <th className="p-2">Variant</th>
-                                            <th className="p-2 w-20 text-center">Ảnh</th>
-                                            <th className="p-2 w-28">Giá (+/-)</th>
-                                            <th className="p-2 w-20 text-center">Kho</th>
+                                            <th className="p-2">{t('Biến thể', 'Variant')}</th>
+                                            <th className="p-2 w-20 text-center">{t('Ảnh', 'Img')}</th>
+                                            <th className="p-2 w-28">{t('Giá (+/-)', 'Price')}</th>
+                                            <th className="p-2 w-20 text-center">{t('Kho', 'Stock')}</th>
                                             <th className="p-2 w-10"></th>
                                         </tr>
                                     </thead>
@@ -452,7 +458,7 @@ export default function AdminProducts() {
                  {/* IMAGES & STOCK (SINGLE) */}
                  <div className="grid grid-cols-1 gap-4">
                     <div>
-                        <label className="block text-sm font-bold mb-2 text-slate-600">Hình ảnh chung</label>
+                        <label className="block text-sm font-bold mb-2 text-slate-600">{t('Hình ảnh chung', 'General Images')}</label>
                         <div className="flex flex-wrap gap-3">
                             {productForm.images && productForm.images.map((img, idx) => (
                                 <div key={idx} className="relative group w-16 h-16 border rounded overflow-hidden shadow-sm">
@@ -469,26 +475,26 @@ export default function AdminProducts() {
                     {(!productForm.variants || productForm.variants.length === 0) && (
                         <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex justify-between items-center">
                              <div>
-                                <label className="block text-sm font-bold text-orange-800">Kho hàng (Sản phẩm đơn)</label>
+                                <label className="block text-sm font-bold text-orange-800">{t('Kho hàng (Sản phẩm đơn)', 'Inventory')}</label>
                                 <div className="text-2xl font-bold text-orange-600">{productForm.physical_stock}</div>
                              </div>
-                             <button type="button" onClick={() => { if(!productForm.id) return toast.warn("Lưu trước!"); setShowKeyModal({product: productForm, sku: null}); }} className="bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:bg-orange-100 transition shadow-sm text-sm">Nhập kho</button>
+                             <button type="button" onClick={() => { if(!productForm.id) return toast.warn("Lưu trước!"); setShowKeyModal({product: productForm, sku: null}); }} className="bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded font-bold hover:bg-orange-100 transition shadow-sm text-sm">{t('Nhập kho', 'Import')}</button>
                         </div>
                     )}
                  </div>
               </div>
 
               <div className="p-5 border-t bg-slate-50 flex justify-end gap-3 sticky bottom-0 z-10">
-                  <button type="button" onClick={() => setShowProductModal(false)} className="px-5 py-2 text-slate-600 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg font-medium transition">Hủy</button>
+                  <button type="button" onClick={() => setShowProductModal(false)} className="px-5 py-2 text-slate-600 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg font-medium transition">{t('Hủy', 'Cancel')}</button>
                   <button type="button" onClick={handleSaveProduct} disabled={processing} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow transition flex items-center gap-2">
-                      {processing ? 'Đang lưu...' : <><Save size={18}/> Lưu Sản Phẩm</>}
+                      {processing ? t('Đang lưu...', 'Saving...') : <><Save size={18}/> {t('Lưu Sản Phẩm', 'Save Product')}</>}
                   </button>
               </div>
            </div>
         </div>
       )}
 
-      {/* MODAL IMPORT KEY/STOCK (GIỮ NGUYÊN UI) */}
+      {/* MODAL IMPORT KEY/STOCK */}
       {showKeyModal && (
          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md animate-scale-in">
@@ -496,15 +502,15 @@ export default function AdminProducts() {
                    {showKeyModal.product.is_digital ? <Key className="text-blue-600"/> : <Layers className="text-orange-600"/>}
                    {showKeyModal.product.is_digital ? t('Nhập Keys', 'Import Keys') : t('Thêm tồn kho', 'Add Stock')}
                </h3>
-               {showKeyModal.sku && <div className="mb-4 bg-slate-100 p-2 rounded text-xs font-bold text-slate-600">Variant: {showKeyModal.sku.sku_name}</div>}
+               {showKeyModal.sku && <div className="mb-4 bg-slate-100 p-2 rounded text-xs font-bold text-slate-600">{t('Biến thể:', 'Variant:')} {showKeyModal.sku.sku_name}</div>}
                {showKeyModal.product.is_digital ? (
                    <textarea className="w-full border p-3 h-32 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="Mỗi dòng 1 key..."></textarea>
                ) : (
                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center"><input type="number" className="w-24 border p-2 rounded-lg text-center font-bold text-2xl outline-none" value={stockInput} onChange={e => setStockInput(e.target.value)}/></div>
                )}
                <div className="flex justify-end gap-2 mt-6">
-                   <button onClick={() => setShowKeyModal(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition">Đóng</button>
-                   <button onClick={handleImportStock} className="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 shadow transition">Lưu</button>
+                   <button onClick={() => setShowKeyModal(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition">{t('Đóng', 'Close')}</button>
+                   <button onClick={handleImportStock} className="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 shadow transition">{t('Lưu', 'Save')}</button>
                </div>
             </div>
          </div>
