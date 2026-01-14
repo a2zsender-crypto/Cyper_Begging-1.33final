@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { useTranslation } from 'react-i18next'; // Giữ nguyên thư viện gốc
 import { Link } from 'react-router-dom';
-// [FIX 1] Dùng Context nội bộ thay vì thư viện ngoài để đồng bộ dữ liệu
-import { useLang } from '../context/LangContext';
 
 const Contact = () => {
-  // [FIX 2] Lấy hàm t và biến lang từ Context
-  const { t, lang } = useLang();
-
+  const { t, i18n } = useTranslation(); // Giữ nguyên hook gốc
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -21,7 +18,7 @@ const Contact = () => {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Tạo phép tính Captcha
+  // ... (Giữ nguyên logic Captcha và useEffect) ...
   const generateMathCaptcha = () => {
     const num1 = Math.floor(Math.random() * 10) + 1;
     const num2 = Math.floor(Math.random() * 10) + 1;
@@ -30,8 +27,6 @@ const Contact = () => {
 
   useEffect(() => {
     generateMathCaptcha();
-    
-    // Lấy Session và load lịch sử
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
@@ -65,7 +60,6 @@ const Contact = () => {
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
-    
     if (!error && data) setHistory(data);
   };
 
@@ -82,15 +76,15 @@ const Contact = () => {
 
     setLoading(true);
     try {
-        // [FIX 3] Gửi request kèm user_id và biến 'lang' lấy từ Context
+        // [QUAN TRỌNG] Chỉ thêm dòng language vào đây
         const { data, error } = await supabase.functions.invoke('contact-handler', {
             body: { 
                 name: formData.name, 
                 email: formData.email, 
                 phone: formData.phone, 
                 message: formData.message,
-                user_id: session?.user?.id || null, 
-                language: lang // Gửi 'vi' hoặc 'en' chuẩn từ Context
+                user_id: session?.user?.id || null,
+                language: i18n.language // Lấy ngôn ngữ hiện tại của user (ví dụ: 'en', 'vi')
             }
         });
 
@@ -99,7 +93,6 @@ const Contact = () => {
 
         alert(t("Gửi thành công! Chúng tôi sẽ liên hệ sớm.", "Sent successfully! We will contact you soon."));
         
-        // Reset form & Refresh history
         if (session) {
             setFormData(prev => ({ ...prev, message: '', phone: '', captchaInput: '' }));
             fetchHistory(session.user.id);
@@ -115,6 +108,7 @@ const Contact = () => {
     }
   };
 
+  // ... (Giữ nguyên phần return JSX bên dưới không thay đổi 1 byte nào) ...
   return (
     <div className="container mx-auto p-4 max-w-4xl">
       <h1 className="text-3xl font-bold mb-6 text-center text-blue-600 uppercase">
@@ -122,7 +116,6 @@ const Contact = () => {
       </h1>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* FORM LIÊN HỆ */}
         <div className="bg-white p-6 shadow rounded-lg">
           <h2 className="text-xl font-semibold mb-4">{t("Gửi yêu cầu", "Submit Request")}</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -137,7 +130,7 @@ const Contact = () => {
               <label className="block text-gray-700">Email</label>
               <input type="email" name="email" required 
                 value={formData.email} onChange={handleChange}
-                disabled={!!session} // Không cho sửa email nếu đã login
+                disabled={!!session}
                 className="w-full border p-2 rounded focus:ring focus:ring-blue-200 disabled:bg-gray-100" />
             </div>
 
@@ -155,7 +148,6 @@ const Contact = () => {
                 className="w-full border p-2 rounded focus:ring focus:ring-blue-200"></textarea>
             </div>
 
-            {/* Captcha */}
             <div>
                <label className="block text-gray-700 font-medium">
                  {t("Phép tính xác thực", "Security Question")}: {mathProblem.text}
@@ -173,9 +165,7 @@ const Contact = () => {
           </form>
         </div>
 
-        {/* THÔNG TIN & LỊCH SỬ */}
         <div className="space-y-6">
-          {/* Thông tin liên hệ tĩnh */}
           <div className="bg-blue-50 p-6 rounded-lg border border-blue-100">
             <h2 className="text-lg font-bold text-blue-800 mb-2">{t("Thông tin liên hệ", "Contact Info")}</h2>
             <ul className="space-y-2 text-gray-700">
@@ -186,7 +176,6 @@ const Contact = () => {
             </ul>
           </div>
 
-          {/* Lịch sử Hỗ trợ (Chỉ hiện khi login) */}
           {showHistory && (
              <div className="bg-white p-6 shadow rounded-lg">
                 <h2 className="text-xl font-semibold mb-4">{t("Lịch sử hỗ trợ của bạn", "Your Support History")}</h2>
