@@ -15,7 +15,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
   const [replyMessage, setReplyMessage] = useState('');
   const chatEndRef = useRef(null);
 
-  // Lấy tên shop
+  // Lấy tên shop từ cấu hình
   const { data: siteSettings = {} } = useQuery({
     queryKey: ['site-settings'],
     queryFn: async () => {
@@ -33,7 +33,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
     if (session) fetchContacts();
   }, [role, session]);
 
-  // LOGIC MỞ TICKET TỰ ĐỘNG
+  // LOGIC MỞ TICKET TỰ ĐỘNG (KHI CLICK TỪ THÔNG BÁO)
   useEffect(() => {
       if (activeTicketId && contacts.length > 0) {
           const ticket = contacts.find(c => c.id.toString() === activeTicketId.toString());
@@ -43,7 +43,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       }
   }, [activeTicketId, contacts]);
 
-  // REALTIME & FORCE OPEN LOGIC
+  // REALTIME & FORCE OPEN LOGIC (EVENT LISTENER)
   useEffect(() => {
       const handleForceOpen = (e) => {
           const ticketId = e.detail;
@@ -58,7 +58,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       return () => window.removeEventListener('FORCE_OPEN_TICKET', handleForceOpen);
   }, [contacts]);
 
-  // REALTIME DB (Danh sách ticket)
+  // REALTIME DB (CẬP NHẬT DANH SÁCH TICKET KHI CÓ MỚI)
   useEffect(() => {
       if (!session) return;
       const channel = supabase.channel('realtime-contacts')
@@ -76,7 +76,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       return () => supabase.removeChannel(channel);
   }, [session, role]);
 
-  // REALTIME CHAT (Sửa lại logic ID và check duplicate)
+  // REALTIME CHAT (CẬP NHẬT TIN NHẮN TRONG MODAL)
   useEffect(() => {
       if (!showTicketModal) return;
       const channel = supabase.channel(`chat-${showTicketModal.id}`)
@@ -93,6 +93,7 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       return () => supabase.removeChannel(channel);
   }, [showTicketModal]);
 
+  // AUTO SCROLL XUỐNG CUỐI KHUNG CHAT
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [ticketReplies, showTicketModal]);
 
   const fetchContacts = async () => {
@@ -107,12 +108,14 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
       setShowTicketModal(ticket);
       const { data } = await supabase.from('contact_replies').select('*').eq('contact_id', ticket.id).order('created_at', { ascending: true });
       setTicketReplies(data || []);
+      
+      // Nếu Admin mở ticket mới -> Đổi trạng thái thành "Đã xem/Processed"
       if (role === 'admin' && ticket.status === 'new') {
           await supabase.from('contacts').update({ status: 'processed' }).eq('id', ticket.id);
       }
   };
 
-  // FIX: Hiển thị ngay lập tức khi gửi (Optimistic UI)
+  // GỬI TIN NHẮN (OPTIMISTIC UI: Hiện ngay không cần chờ DB phản hồi)
   const handleSendReply = async (e) => {
       e.preventDefault();
       if (!replyMessage.trim()) return;
@@ -129,9 +132,12 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
 
           if (error) throw error;
 
-          // Cập nhật ngay vào danh sách chat (Không chờ Realtime)
+          // Cập nhật ngay vào danh sách chat (phòng trường hợp Realtime chậm)
           if (data) {
-              setTicketReplies(prev => [...prev, data]);
+              setTicketReplies(prev => {
+                  if (prev.some(r => r.id === data.id)) return prev;
+                  return [...prev, data];
+              });
           }
       } catch (err) { 
           toast.error(err.message);
@@ -164,9 +170,8 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
           <table className="w-full text-left">
             <thead className="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold tracking-wider sticky top-0">
                 <tr>
-                    {/* [UPDATE 1]: Thêm cột ID (Đã chỉnh sửa) */}
+                    {/* [CỘT MỚI]: #ID */}
                     <th className="p-4 w-16 text-center">#ID</th>
-                    
                     <th className="p-4">{t('Ngày', 'Date')}</th>
                     <th className="p-4">{role==='admin' ? t('Khách hàng', 'Customer') : t('Chủ đề', 'Subject')}</th>
                     <th className="p-4">{t('Trạng thái', 'Status')}</th>
@@ -176,9 +181,10 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
             <tbody className="divide-y divide-slate-100">
               {contacts.length > 0 ? contacts.map(c => (
                 <tr key={c.id} className={`hover:bg-slate-50 transition cursor-pointer ${c.status === 'new' ? 'bg-blue-50/30' : ''}`} onClick={() => openTicketChat(c)}>
-                    {/* [UPDATE 2]: Hiển thị ID (Đã chỉnh sửa) */}
+                    
+                    {/* [DỮ LIỆU CỘT MỚI]: Hiển thị ID */}
                     <td className="p-4 text-center font-bold text-blue-600">#{c.id}</td>
-
+                    
                     <td className="p-4 text-sm text-slate-500 whitespace-nowrap">{new Date(c.created_at).toLocaleString()}</td>
                     <td className="p-4">
                         {role === 'admin' ? (
@@ -195,14 +201,14 @@ export default function AdminContacts({ session, role, activeTicketId, onNewTick
                     <td className="p-4"><button className="text-blue-600 bg-blue-50 p-2 rounded-lg hover:bg-blue-100 transition"><MessageSquare size={18}/></button></td>
                 </tr>
               )) : (
-                  // [UPDATE 3]: Sửa colSpan từ 4 thành 5
+                  // Đã sửa colSpan thành 5 cho cân đối
                   <tr><td colSpan="5" className="p-8 text-center text-slate-400">{t('Chưa có yêu cầu hỗ trợ nào.', 'No support tickets found.')}</td></tr>
               )}
             </tbody>
           </table>
        </div>
 
-       {/* CHAT MODAL */}
+       {/* CHAT MODAL (Giữ nguyên) */}
        {showTicketModal && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[999] p-4 backdrop-blur-sm">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col overflow-hidden animate-scale-in">
