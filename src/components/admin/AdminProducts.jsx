@@ -29,7 +29,7 @@ export default function AdminProducts() {
     description: '', description_en: '', is_digital: true, 
     physical_stock: 0, images: [], 
     variants: [], 
-    allow_external_key: false // Biến này đã có trong state, chỉ thiếu UI
+    allow_external_key: false 
   });
   
   // State quản lý danh sách các biến thể chi tiết (SKUs)
@@ -70,7 +70,6 @@ export default function AdminProducts() {
     
     if(validVariants.length > 0) {
         const combos = generateCombinations(validVariants);
-        // Merge logic
         const mergedSkus = combos.map(combo => {
             const existing = skuList.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
             if (existing) return existing;
@@ -178,7 +177,7 @@ export default function AdminProducts() {
               description: productForm.description, description_en: productForm.description_en,
               images: productForm.images, is_digital: productForm.is_digital,
               variants: productForm.variants, 
-              allow_external_key: productForm.allow_external_key // Đã lưu vào DB
+              allow_external_key: productForm.allow_external_key
           };
           
           if (!productForm.variants || productForm.variants.length === 0) {
@@ -197,14 +196,12 @@ export default function AdminProducts() {
 
           // 2. Lưu Variants
           if (productForm.variants && productForm.variants.length > 0 && skuList.length > 0) {
-               // A. Cleanup
                const { data: existingVariants } = await supabase.from('product_variants').select('id').eq('product_id', productId);
                const existingIds = existingVariants?.map(v => v.id) || [];
                const currentUiIds = skuList.map(s => s.id).filter(id => id !== null);
                const idsToDelete = existingIds.filter(id => !currentUiIds.includes(id));
                if (idsToDelete.length > 0) await supabase.from('product_variants').delete().in('id', idsToDelete);
 
-               // B. Prepare Data (LOẠI BỎ ID NULL)
                const upsertData = skuList.map(sku => {
                    const record = {
                        product_id: productId,
@@ -286,6 +283,7 @@ export default function AdminProducts() {
        <div className="flex justify-between mb-6 items-center">
          <div>
              <h2 className="text-2xl font-bold text-slate-800">{t('Kho Sản Phẩm', 'Inventory')}</h2>
+             {/* ĐÃ FIX: Chuyển text cứng thành t() */}
              <p className="text-sm text-slate-500">{t('Quản lý sản phẩm và biến thể', 'Manage products and variants')}</p>
          </div>
          <button onClick={openAddModal} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow hover:bg-blue-700 transition"><Plus size={18}/> {t('Thêm Mới', 'Add New')}</button>
@@ -366,7 +364,7 @@ export default function AdminProducts() {
                              <option value="physical">Physical (Ship)</option>
                          </select>
                          
-                         {/* --- KHÔI PHỤC TÍNH NĂNG GET CODE API --- */}
+                         {/* ĐÃ FIX: Thêm lại checkbox Get Code API */}
                          {productForm.is_digital && (
                              <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
                                  <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={productForm.allow_external_key} onChange={e => setProductForm({...productForm, allow_external_key: e.target.checked})}/>
@@ -412,7 +410,7 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* SKU MATRIX */}
+                    {/* SKU MATRIX - ĐÃ FIX TIÊU ĐỀ */}
                     {productForm.variants.length > 0 && skuList.length > 0 && (
                         <div className="mt-4 border-t pt-4">
                             <label className="block text-sm font-bold text-slate-700 mb-2">{t('Chi tiết biến thể (Giá & Ảnh)', 'Variant Details')}</label>
