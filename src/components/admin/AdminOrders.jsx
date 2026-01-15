@@ -182,7 +182,7 @@ const AdminOrders = () => {
           // 3. GỬI TELEGRAM (Client-side Direct)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (Via Function - Dùng phương pháp chuẩn)
+          // 4. GỬI EMAIL (Via Function)
           await sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Update UI
@@ -198,7 +198,7 @@ const AdminOrders = () => {
       }
   };
 
-  // Gửi Telegram trực tiếp từ trình duyệt (Dùng cho Admin tác vụ nhanh)
+  // Gửi Telegram trực tiếp
   const sendDirectTelegram = async (orderId, status) => {
       try {
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
@@ -210,14 +210,14 @@ const AdminOrders = () => {
           const text = `📦 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
-          await fetch(url, { mode: 'no-cors' }); // no-cors để tránh lỗi trình duyệt chặn
+          await fetch(url, { mode: 'no-cors' });
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
-  // Gửi Email qua Supabase Function (Chuẩn bảo mật)
+  // Gửi Email qua Supabase Function
   const sendEmailNotification = async (email, orderId, status) => {
       try {
-          // Gọi function 'send-order-email' (không cần hardcode URL)
+          // Gọi function 'send-order-email'
           const { error } = await supabase.functions.invoke('send-order-email', {
               body: { email, orderId, status, lang }
           });
@@ -445,12 +445,31 @@ const AdminOrders = () => {
                                 
                                 {item.assigned_key ? (
                                     <MaskedKeyDisplay text={item.assigned_key} t={t} />
-                                ) : (
-                                    isDigital && (selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && (
+                                ) : isDigital ? (
+                                    (selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && (
                                         <div className="text-xs text-amber-600 flex items-center gap-1 mt-1 font-medium bg-amber-50 w-fit px-2 py-1 rounded">
                                             <AlertTriangle size={12}/> {t('Đang chờ xử lý key...', 'Processing key...')}
                                         </div>
                                     )
+                                ) : (
+                                    // --- [NEW LOGIC] HIỂN THỊ TRẠNG THÁI HÀNG VẬT LÝ ---
+                                    <div className="mt-1">
+                                        {selectedOrder.status === 'paid' && (
+                                            <span className="text-xs font-bold text-yellow-600 bg-yellow-50 px-2 py-1 rounded border border-yellow-100 flex w-fit items-center gap-1">
+                                                📦 {t('Đơn hàng đang chờ ship', 'Awaiting Shipping')}
+                                            </span>
+                                        )}
+                                        {selectedOrder.status === 'shipping' && (
+                                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 flex w-fit items-center gap-1">
+                                                🚚 {t('Đơn hàng đang giao', 'Delivering')}
+                                            </span>
+                                        )}
+                                        {selectedOrder.status === 'completed' && (
+                                            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100 flex w-fit items-center gap-1">
+                                                ✅ {t('Giao hàng thành công', 'Delivered')}
+                                            </span>
+                                        )}
+                                    </div>
                                 )}
                               </div>
                             </td>
