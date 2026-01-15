@@ -9,44 +9,44 @@ export default function AdminProducts() {
   const { t, lang } = useLang(); 
   const queryClient = useQueryClient(); 
   
-  // --- FETCH PRODUCTS & STOCK ---
-  // Lấy dữ liệu sản phẩm kèm tồn kho realtime từ View
+  // --- 1. FETCH PRODUCTS & STOCK ---
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
-      // 1. Lấy danh sách sản phẩm
+      // 1.1 Lấy danh sách sản phẩm
       const { data: productsData, error: prodError } = await supabase
         .from('products')
         .select('*')
         .order('id', {ascending: false});
       if (prodError) throw prodError;
 
-      // 2. Lấy dữ liệu tồn kho chi tiết từ View
+      // 1.2 Lấy dữ liệu tồn kho REALTIME từ View mới
       const { data: stockData, error: stockError } = await supabase
         .from('view_product_variant_stock')
         .select('*');
       
       if (stockError) console.error("Stock View Error:", stockError);
 
-      // 3. Merge stock vào từng sản phẩm để hiển thị tổng quan ngoài bảng
+      // 1.3 Merge stock vào từng sản phẩm để hiển thị
       return productsData.map(p => {
-          // Cộng tổng tồn kho của tất cả biến thể (hoặc sản phẩm đơn)
+          // Tính tổng tồn kho của tất cả biến thể
           const totalStock = stockData
             ?.filter(s => s.product_id === p.id)
             .reduce((sum, item) => sum + (item.stock_available || 0), 0);
 
           return {
               ...p,
+              // Với hàng vật lý không biến thể, View trả về p.physical_stock.
+              // Với hàng có biến thể, View trả về tổng các variants.
               true_stock: totalStock || 0
           };
       });
     }
   });
 
-  // --- [LOGIC MỚI] LẤY DANH SÁCH SKU ĐỂ CHECK TRÙNG ---
+  // --- 2. FETCH SKU NAMES (Để check trùng) ---
   const [existingSkuNames, setExistingSkuNames] = useState(new Set());
   
-  // Load toàn bộ SKU name đang có trong hệ thống để tránh trùng lặp
   useEffect(() => {
       const fetchAllSkus = async () => {
           const { data } = await supabase.from('product_variants').select('sku_name');
@@ -58,11 +58,10 @@ export default function AdminProducts() {
       fetchAllSkus();
   }, [products]); 
 
-  // --- MODAL STATES ---
+  // --- 3. MODAL & FORM STATES ---
   const [showProductModal, setShowProductModal] = useState(false);
   const [showKeyModal, setShowKeyModal] = useState(null); 
   
-  // Form State
   const [productForm, setProductForm] = useState({
     id: null, title: '', title_en: '', price: '', 
     description: '', description_en: '', is_digital: true, 
@@ -79,15 +78,13 @@ export default function AdminProducts() {
   const [processing, setProcessing] = useState(false);
   const [skuUploading, setSkuUploading] = useState(null);
 
-  // --- LOGIC GENERATOR: SINH BIẾN THỂ & TỰ ĐỘNG ĐÁNH SỐ SKU ---
+  // --- 4. LOGIC SINH BIẾN THỂ & SKU TỰ ĐỘNG ---
   useEffect(() => {
-    // Nếu không có variants cấu hình, reset list
     if (!productForm.variants || productForm.variants.length === 0) {
         if (!productForm.id && skuList.length > 0) setSkuList([]); 
         return;
     }
 
-    // Hàm đệ quy sinh tổ hợp (Cartesian product)
     const generateCombinations = (groups, prefix = {}) => {
         if (!groups.length) return [prefix];
         const firstGroup = groups[0];
@@ -110,41 +107,36 @@ export default function AdminProducts() {
     
     if(validVariants.length > 0) {
         const combos = generateCombinations(validVariants);
-        
-        // Set chứa các tên SKU đang được tạo trong phiên làm việc này (để tránh trùng nội bộ)
         const currentSessionNames = new Set(); 
         skuList.forEach(s => currentSessionNames.add(s.sku_name.toLowerCase()));
 
         const mergedSkus = combos.map(combo => {
-            // 1. Nếu combo này đã tồn tại trong list hiện tại (đang edit), giữ nguyên
+            // Giữ lại SKU cũ nếu options khớp
             const existing = skuList.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
             if (existing) {
                 currentSessionNames.add(existing.sku_name.toLowerCase());
                 return existing;
             }
             
-            // 2. Nếu là combo mới, sinh tên SKU tự động
+            // Tạo SKU mới
             let baseName = Object.values(combo).join(' - ');
             let uniqueName = baseName;
             let counter = 1;
 
-            // Logic Check Trùng: Trùng trong DB HOẶC Trùng trong list đang tạo
+            // Check trùng lặp
             while (
                 existingSkuNames.has(uniqueName.toLowerCase()) || 
                 currentSessionNames.has(uniqueName.toLowerCase())
             ) {
-                // Tự động thêm số vào sau: VN -> VN1 -> VN2
                 uniqueName = `${baseName}${counter}`; 
                 counter++;
             }
-
-            // Đánh dấu tên này đã dùng
             currentSessionNames.add(uniqueName.toLowerCase());
 
             return {
                 id: null,
                 options: combo,
-                sku_name: uniqueName, // Tên SKU đảm bảo duy nhất
+                sku_name: uniqueName,
                 stock: 0,
                 price_mod: 0,
                 image: '',
@@ -152,7 +144,6 @@ export default function AdminProducts() {
             };
         });
         
-        // Update state nếu có thay đổi cấu trúc
         const currentOptionsJSON = JSON.stringify(skuList.map(s => s.options));
         const newOptionsJSON = JSON.stringify(mergedSkus.map(s => s.options));
         
@@ -164,13 +155,13 @@ export default function AdminProducts() {
     }
   }, [productForm.variants]);
 
-  // --- FETCH SKUs KHI EDIT ---
+  // --- 5. FETCH SKUs KHI EDIT ---
   const fetchSkus = async (productId) => {
       const { data, error } = await supabase.from('product_variants').select('*').eq('product_id', productId);
       if(!error && data) setSkuList(data);
   };
 
-  // --- HANDLERS UI (Giữ nguyên logic form) ---
+  // --- 6. HANDLERS UI ---
   const addVariantGroup = () => setProductForm(prev => ({ ...prev, variants: [...(prev.variants || []), { name: '', options: [] }] }));
   const removeVariantGroup = (idx) => setProductForm(prev => { const n = [...prev.variants]; n.splice(idx, 1); return { ...prev, variants: n }; });
   const updateVariantName = (idx, val) => setProductForm(prev => { const n = [...prev.variants]; n[idx].name = val; return { ...prev, variants: n }; });
@@ -235,24 +226,24 @@ export default function AdminProducts() {
       setShowProductModal(true);
   };
 
-  // --- SAVE PRODUCT ---
+  // --- 7. SAVE PRODUCT ---
   const handleSaveProduct = async (e) => {
       e.preventDefault();
       setProcessing(true);
       try {
-          // CHECK VALIDATION: SKU NAME PHẢI DUY NHẤT
+          // Validate SKU Names
           if (skuList.length > 0) {
               const skuNames = skuList.map(s => s.sku_name.trim().toLowerCase());
               const uniqueNames = new Set(skuNames);
               if (skuNames.length !== uniqueNames.size) {
-                  throw new Error(t("Mã SKU không được trùng nhau!", "SKU Names must be unique!"));
+                  throw new Error(t("Mã SKU bị trùng!", "Duplicate SKU names!"));
               }
               if (skuList.some(s => !s.sku_name || s.sku_name.trim() === '')) {
-                   throw new Error(t("Mã SKU không được để trống!", "SKU Name cannot be empty!"));
+                   throw new Error(t("Mã SKU không được trống!", "SKU required!"));
               }
           }
 
-          // 1. Lưu Products
+          // Save Product Base
           const productData = {
               title: productForm.title, title_en: productForm.title_en,
               price: parseFloat(productForm.price) || 0,
@@ -276,7 +267,7 @@ export default function AdminProducts() {
               productId = data.id;
           }
 
-          // 2. Lưu Variants (SKU)
+          // Save Variants (Upsert logic)
           if (productForm.variants && productForm.variants.length > 0 && skuList.length > 0) {
                const { data: existingVariants } = await supabase.from('product_variants').select('id').eq('product_id', productId);
                const existingIds = existingVariants?.map(v => v.id) || [];
@@ -285,19 +276,16 @@ export default function AdminProducts() {
                
                if (idsToDelete.length > 0) await supabase.from('product_variants').delete().in('id', idsToDelete);
 
-               const upsertData = skuList.map(sku => {
-                   const record = {
-                       product_id: productId,
-                       options: sku.options,
-                       sku_name: sku.sku_name.trim(), // Lưu tên SKU chuẩn
-                       price_mod: parseFloat(sku.price_mod) || 0,
-                       stock: parseInt(sku.stock) || 0,
-                       image: sku.image,
-                       is_active: true
-                   };
-                   if (sku.id) record.id = sku.id; 
-                   return record;
-               });
+               const upsertData = skuList.map(sku => ({
+                   id: sku.id || undefined, // Nếu id null thì undefined để supabase tự tạo mới
+                   product_id: productId,
+                   options: sku.options,
+                   sku_name: sku.sku_name.trim(),
+                   price_mod: parseFloat(sku.price_mod) || 0,
+                   stock: parseInt(sku.stock) || 0, // Lưu đúng tồn kho vật lý tại đây
+                   image: sku.image,
+                   is_active: true
+               }));
 
                const { error: upsertError } = await supabase.from('product_variants').upsert(upsertData);
                if (upsertError) throw upsertError;
@@ -313,60 +301,83 @@ export default function AdminProducts() {
       }
   };
 
-  // --- IMPORT STOCK (LOGIC CỐT LÕI MỚI) ---
+  // --- 8. IMPORT STOCK (ĐÃ FIX LỖI TỒN KHO 0) ---
   const handleImportStock = async () => {
     try {
         if (!showKeyModal?.product) return;
         const currentProd = showKeyModal.product;
         const targetSku = showKeyModal.sku; 
         
+        // TRƯỜNG HỢP 1: SẢN PHẨM SỐ (DIGITAL)
         if (currentProd.is_digital) {
-            // Nhập Key cho sản phẩm số
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
             
-            // [QUAN TRỌNG] Gắn SKU Name vào thông tin Key
-            // Giúp hệ thống biết chính xác Key này thuộc SKU nào
+            // Gắn SKU Name vào thông tin Key để khớp chính xác
             let variantInfo = targetSku ? { 
                 ...targetSku.options,
-                _sku_name: targetSku.sku_name // Lưu SKU Name vào đây làm bằng chứng
+                _sku_name: targetSku.sku_name 
             } : {};
             
-            // Metadata phụ trợ
             variantInfo._product_name = currentProd.title;
-            if(targetSku) variantInfo._full_title = `${currentProd.title} (${targetSku.sku_name})`;
 
             const insertData = codes.map(code => ({ 
                 product_id: currentProd.id, 
                 key_value: code.trim(), 
-                variant_info: variantInfo, // Lưu JSON chứa options + sku_name
+                variant_info: variantInfo, 
                 is_used: false 
             }));
             
             const { error } = await supabase.from('product_keys').insert(insertData);
             if (error) throw error;
             toast.success(t(`Đã thêm ${insertData.length} Keys!`, `Added ${insertData.length} Keys!`));
-
-            // Refresh lại để cập nhật số tồn kho hiển thị
             queryClient.invalidateQueries({ queryKey: ['admin-products'] });
 
-        } else {
-            // Nhập kho cho sản phẩm vật lý (Giữ nguyên)
+        } 
+        // TRƯỜNG HỢP 2: SẢN PHẨM VẬT LÝ (PHYSICAL)
+        else {
             const qtyToAdd = parseInt(stockInput);
             if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn(t("Số lượng > 0", "Qty > 0"));
+            
+            // Nếu là Biến thể (Variant)
             if (targetSku) {
-                const newStock = (parseInt(targetSku.stock) || 0) + qtyToAdd;
-                const { error } = await supabase.from('product_variants').update({ stock: newStock }).eq('id', targetSku.id);
-                if (error) throw error;
-                // Update UI local
-                const skuIndex = skuList.findIndex(s => s.id === targetSku.id);
-                if (skuIndex >= 0) updateSkuField(skuIndex, 'stock', newStock);
-            } else {
+                const currentStock = parseInt(targetSku.stock) || 0;
+                const newStock = currentStock + qtyToAdd;
+
+                // [FIX LỖI] Nếu biến thể chưa được lưu vào DB (id = null), chỉ cập nhật state UI
+                if (!targetSku.id) {
+                    const skuIndex = skuList.findIndex(s => JSON.stringify(s.options) === JSON.stringify(targetSku.options));
+                    if (skuIndex >= 0) {
+                        updateSkuField(skuIndex, 'stock', newStock);
+                        toast.info(t("Đã cập nhật tạm thời. Hãy bấm LƯU SẢN PHẨM!", "Updated locally. Please Click SAVE PRODUCT!"));
+                    }
+                } else {
+                    // Nếu đã có ID, update thẳng vào DB
+                    const { error } = await supabase.from('product_variants').update({ stock: newStock }).eq('id', targetSku.id);
+                    if (error) throw error;
+                    
+                    // Update luôn UI local để user thấy ngay
+                    const skuIndex = skuList.findIndex(s => s.id === targetSku.id);
+                    if (skuIndex >= 0) updateSkuField(skuIndex, 'stock', newStock);
+                    
+                    toast.success(t("Cập nhật kho thành công!", "Stock updated!"));
+                }
+            } 
+            // Nếu là Sản phẩm đơn (No Variant)
+            else {
+                // Kiểm tra xem sản phẩm đã tạo chưa
+                if (!currentProd.id) return toast.warn(t("Vui lòng lưu sản phẩm trước!", "Please save product first!"));
+                
                 const { data: latest } = await supabase.from('products').select('physical_stock').eq('id', currentProd.id).single();
                 const newStock = (latest.physical_stock || 0) + qtyToAdd;
-                await supabase.from('products').update({ physical_stock: newStock }).eq('id', currentProd.id);
+                
+                const { error } = await supabase.from('products').update({ physical_stock: newStock }).eq('id', currentProd.id);
+                if (error) throw error;
+                
+                // Cập nhật form state
+                setProductForm(prev => ({ ...prev, physical_stock: newStock }));
+                toast.success(t("Cập nhật kho thành công!", "Stock updated!"));
             }
-            toast.success(t("Cập nhật kho thành công!", "Stock updated!"));
         }
         setKeyInput(''); setStockInput(0); setShowKeyModal(null);
         queryClient.invalidateQueries({ queryKey: ['admin-products'] });
