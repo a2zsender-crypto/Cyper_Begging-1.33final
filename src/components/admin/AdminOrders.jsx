@@ -380,8 +380,9 @@ const AdminOrders = () => {
                   <div className="space-y-2 text-sm">
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Email:', 'Email:')}</span> {selectedOrder.customer_email}</p>
                     <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Họ tên:', 'Name:')}</span> {selectedOrder.customer_name || 'N/A'}</p>
-                    <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
-                    
+                    {selectedOrder.contact_info && (
+                        <p><span className="text-blue-600 font-medium w-24 inline-block">{t('Liên hệ:', 'Contact:')}</span> {selectedOrder.contact_method} - {selectedOrder.contact_info}</p>
+                    )}                    
                     {/* HIỂN THỊ ĐỊA CHỈ SHIP */}
                     {(() => {
                         const hasPhysical = selectedOrder.order_items?.some(i => i.products?.is_digital === false);
