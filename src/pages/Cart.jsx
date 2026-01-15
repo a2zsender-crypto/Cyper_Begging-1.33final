@@ -44,7 +44,7 @@ export default function Cart() {
       checkUser();
   }, []);
 
-  // Xử lý thanh toán
+// Xử lý thanh toán
   const handleCheckout = async () => {
       if (!formData.name || !formData.email) return alert(t('Vui lòng điền Tên và Email', 'Please fill Name and Email'));
       if (hasPhysical && (!formData.phone || !formData.address)) return alert(t('Vui lòng điền địa chỉ giao hàng', 'Please fill shipping address'));
@@ -82,7 +82,6 @@ export default function Cart() {
               let variantDetails = '';
 
               if (i.selectedVariants && typeof i.selectedVariants === 'object') {
-                  // Object: {Color: "Red", Storage: "256GB"} -> "Color: Red, Storage: 256GB"
                   variantDetails = Object.entries(i.selectedVariants)
                       .map(([key, value]) => `${key}: ${value}`)
                       .join(', ');
@@ -92,38 +91,46 @@ export default function Cart() {
                   variantDetails = i.selected_variant;
               }
 
-              // 3. Ghép tên hiển thị (cho đẹp mắt nếu cần debug)
+              // 3. Ghép tên hiển thị
               const fullName = variantDetails ? `${itemName} (${variantDetails})` : itemName;
 
               return {
-                  id: i.id,
+                  id: i.id, // Product ID
+                  // [FIX QUAN TRỌNG] Gửi thêm Variant ID (nếu có) để backend check giá
+                  // Bạn cần đảm bảo lúc thêm vào giỏ (CartContext), biến thể có trường 'id' (là id của bảng product_variants)
+                  // Thường nếu logic đúng thì i.variant_id hoặc i.id (nếu i là item biến thể) sẽ chứa giá trị này.
+                  // Ở đây tôi giả định bạn lưu ID biến thể vào field 'variant_id' hoặc 'sku_id'
+                  variant_id: i.variant_id || i.sku_id || null, 
+
                   quantity: i.quantity,
-                  price: i.price,
+                  price: i.price, // Giá này ở Frontend đã bao gồm mod, Backend nên dùng để tham khảo hoặc check lại
                   name: fullName,
                   is_digital: i.is_digital,
-                  variant: variantDetails, // <--- QUAN TRỌNG: Gửi riêng biến thể để Backend lưu vào cột variant_name
-                  selected_variants: i.selectedVariants // Gửi raw data dự phòng
+                  variant: variantDetails, 
+                  selected_variants: i.selectedVariants 
               };
           });
+
+          console.log("Sending Payload:", itemsPayload); // Debug xem tên và variant_id có đúng không
 
           // Gọi Edge Function
           const { data, error } = await supabase.functions.invoke('payment-handler', {
               body: {
-                  items: itemsPayload, // <--- ĐÃ SỬA: Đổi key 'items' thành 'cart' để khớp Backend
+                  cart: itemsPayload, // Đổi key thành 'cart' cho khớp Backend
                   email: formData.email,
                   name: formData.name,
                   contactMethod: formData.contactMethod,
                   contactInfo: formData.contactInfo || (formData.contactMethod === 'Telegram' ? formData.contactInfo : formData.phone),
                   shippingAddress: formData.address,
                   phoneNumber: formData.phone,
-                  language: lang // Gửi ngôn ngữ (vi/en)
+                  language: lang 
               }
           });
 
           if (error) { console.error("Function Error:", error); throw error; }
           if (data?.error) throw new Error(data.error);
 
-          if (data?.payLink) { // Backend trả về payLink (chứ không phải payUrl, kiểm tra lại backend trả gì thì dùng đó, thường OxaPay là payLink)
+          if (data?.payLink) { 
               clearCart(); 
               window.location.href = data.payLink;
           } else if (data?.payUrl) {
