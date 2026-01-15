@@ -63,16 +63,16 @@ const AdminOrders = () => {
   const [userRole, setUserRole] = useState('user'); 
   const ITEMS_PER_PAGE = 10;
 
-  // Deep Link Logic
   const [searchParams, setSearchParams] = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
 
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [newStatus, setNewStatus] = useState('');
 
+  // [YÊU CẦU MỚI] Cập nhật label trạng thái
   const statusLabels = {
       all: t('Tất cả', 'All'),
-      pending: t('Chờ xử lý', 'Pending'),
+      pending: t('Chờ thanh toán', 'Waiting for Payment'), // Đã đổi theo yêu cầu
       paid: t('Đã thanh toán', 'Paid'),
       shipping: t('Đang vận chuyển', 'Shipping'),
       completed: t('Hoàn thành', 'Completed'),
@@ -445,14 +445,16 @@ const AdminOrders = () => {
                                 
                                 {item.assigned_key ? (
                                     <MaskedKeyDisplay text={item.assigned_key} t={t} />
-                                ) : isDigital ? (
-                                    (selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && (
+                                ) : (
+                                    isDigital && (selectedOrder.status === 'completed' || selectedOrder.status === 'paid') && (
                                         <div className="text-xs text-amber-600 flex items-center gap-1 mt-1 font-medium bg-amber-50 w-fit px-2 py-1 rounded">
                                             <AlertTriangle size={12}/> {t('Đang chờ xử lý key...', 'Processing key...')}
                                         </div>
                                     )
-                                ) : (
-                                    // --- [NEW LOGIC] HIỂN THỊ TRẠNG THÁI HÀNG VẬT LÝ ---
+                                )}
+                                
+                                {/* LOGIC HIỂN THỊ STATUS CHO HÀNG VẬT LÝ */}
+                                {!isDigital && (
                                     <div className="mt-1">
                                         {selectedOrder.status === 'paid' && (
                                             <span className="text-xs font-bold text-yellow-600 bg-yellow-50 px-2 py-1 rounded border border-yellow-100 flex w-fit items-center gap-1">
