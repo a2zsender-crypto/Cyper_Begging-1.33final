@@ -144,14 +144,14 @@ const AdminOrders = () => {
     }
   };
 
-  // --- HÀM UPDATE STATUS (ĐÃ SỬA: TIÊU ĐỀ TELEGRAM & QUYỀN GỬI) ---
+  // --- HÀM UPDATE STATUS ---
   const handleUpdateStatus = async () => {
       if (!selectedOrder || !newStatus || newStatus === selectedOrder.status) return;
       if (!window.confirm(t(`Bạn có chắc muốn đổi trạng thái thành "${statusLabels[newStatus] || newStatus}"?`, `Confirm update status to "${statusLabels[newStatus] || newStatus}"?`))) return;
 
       setUpdatingStatus(true);
       try {
-          // 1. UPDATE DB (Admin needs permission via RLS - See SQL below)
+          // 1. UPDATE DB
           const { error } = await supabase
               .from('orders')
               .update({ status: newStatus })
@@ -159,7 +159,7 @@ const AdminOrders = () => {
 
           if (error) throw error;
 
-          // 2. TẠO THÔNG BÁO CHO USER (QUAN TRỌNG: Cần SQL Admin Policy để chạy đc dòng này)
+          // 2. TẠO THÔNG BÁO CHO USER
           if (selectedOrder.user_id) {
               const notifTitle = lang === 'vi' ? 'Cập nhật trạng thái đơn hàng' : 'Order status updated';
               const statusText = statusLabels[newStatus] || newStatus;
@@ -169,7 +169,7 @@ const AdminOrders = () => {
 
               const deepLink = `/cart?orderId=${selectedOrder.id}`;
 
-              const { error: notifError } = await supabase.from('notifications').insert({
+              await supabase.from('notifications').insert({
                   user_id: selectedOrder.user_id,
                   title: notifTitle,
                   message: notifMsg,
@@ -177,16 +177,13 @@ const AdminOrders = () => {
                   link: deepLink,
                   is_read: false
               });
-              
-              if (notifError) console.error("Lỗi Notification (Cần chạy SQL Full):", notifError);
-              else console.log("Đã tạo thông báo chuông OK");
           }
 
           // 3. GỬI TELEGRAM (Client-side Direct)
           sendDirectTelegram(selectedOrder.id, newStatus);
 
-          // 4. GỬI EMAIL (Via Function - Kèm Token Admin)
-          sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
+          // 4. GỬI EMAIL (Via Function - Dùng phương pháp chuẩn)
+          await sendEmailNotification(selectedOrder.customer_email, selectedOrder.id, newStatus);
 
           // 5. Update UI
           toast.success(t('Cập nhật thành công!', 'Updated successfully!'));
@@ -201,7 +198,7 @@ const AdminOrders = () => {
       }
   };
 
-  // Sửa tiêu đề Tele theo yêu cầu
+  // Gửi Telegram trực tiếp từ trình duyệt (Dùng cho Admin tác vụ nhanh)
   const sendDirectTelegram = async (orderId, status) => {
       try {
           const { data: configs } = await supabase.from('app_config').select('*').in('key', ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
@@ -210,30 +207,22 @@ const AdminOrders = () => {
 
           if (!botToken || !chatId) return;
 
-          // SỬA Ở ĐÂY: Tiêu đề tiếng Anh chuẩn
           const text = `📦 <b>Order status updated</b>\nOrder: #${orderId}\nNew Status: <b>${status}</b>`;
           const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
           
-          await fetch(url, { mode: 'no-cors' });
+          await fetch(url, { mode: 'no-cors' }); // no-cors để tránh lỗi trình duyệt chặn
       } catch (e) { console.warn("Tele warning:", e); }
   };
 
+  // Gửi Email qua Supabase Function (Chuẩn bảo mật)
   const sendEmailNotification = async (email, orderId, status) => {
       try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const token = session?.access_token;
-          if (!token) return;
-
-          const FUNCTION_URL = 'https://csxuarismehewgiedoeg.supabase.co/functions/v1/send-order-email';
+          // Gọi function 'send-order-email' (không cần hardcode URL)
+          const { error } = await supabase.functions.invoke('send-order-email', {
+              body: { email, orderId, status, lang }
+          });
           
-          fetch(FUNCTION_URL, {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ email, orderId, status, lang })
-          }).catch(e => console.warn("Email func error:", e));
+          if (error) console.warn("Email func invoke error:", error);
       } catch (e) { console.warn("Email warning:", e); }
   };
 
@@ -318,7 +307,7 @@ const AdminOrders = () => {
               orders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4 font-medium text-slate-900">#{order.id}<div className="text-xs text-slate-400 mt-1">{order.oxapay_track_id || '-'}</div></td>
-                  <td className="px-6 py-4"><div className="text-sm font-medium text-slate-900">{order.customer_name || 'Guest'}</div><div className="text-xs text-slate-500">{order.customer_email}</div></td>
+                  <td className="px-6 py-4"><div className="text-sm font-medium text-slate-900">{order.customer_name || t('Khách vãng lai', 'Guest')}</div><div className="text-xs text-slate-500">{order.customer_email}</div></td>
                   <td className="px-6 py-4 font-bold text-green-600">{formatCurrency(order.amount)}</td>
                   <td className="px-6 py-4">{getStatusBadge(order.status)}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{formatDate(order.created_at)}<div className="text-xs text-slate-400">{formatTime(order.created_at)}</div></td>
@@ -443,7 +432,7 @@ const AdminOrders = () => {
                     </thead>
                     <tbody className="divide-y">
                       {selectedOrder.order_items?.map((item, idx) => {
-                        const displayName = item.product_name || item.products?.title || 'Unknown Product';
+                        const displayName = (lang === 'en' && item.products?.title_en) ? item.products.title_en : (item.product_name || item.products?.title || 'Unknown Product');
                         const variantInfo = item.variant_name; 
                         const isDigital = item.products?.is_digital;
 
