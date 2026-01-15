@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2, Save, AlertCircle, Globe } from 'lucide-react';
+import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2, Save, AlertCircle, Globe, Tag } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
@@ -10,7 +10,7 @@ export default function AdminProducts() {
   const queryClient = useQueryClient(); 
   
   // --- FETCH PRODUCTS & STOCK ---
-  // Đã sửa: Lấy thêm dữ liệu từ view 'product_stock' để hiển thị đúng số lượng
+  // Lấy thêm dữ liệu từ view 'product_stock' để hiển thị đúng số lượng
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
@@ -23,7 +23,7 @@ export default function AdminProducts() {
 
       // 2. Lấy dữ liệu tồn kho từ View (Chứa logic đếm Key và cộng tổng Variant)
       const { data: stockData, error: stockError } = await supabase
-        .from('product_stock')
+        .from('view_product_variant_stock')
         .select('*');
       
       // Nếu lỗi view stock thì log ra nhưng vẫn trả về products để ko chết app
@@ -31,11 +31,14 @@ export default function AdminProducts() {
 
       // 3. Merge stock vào product
       return productsData.map(p => {
-          const stockRecord = stockData?.find(s => s.product_id === p.id);
+          // Tính tổng stock của product này từ view
+          const totalStock = stockData
+            ?.filter(s => s.product_id === p.id)
+            .reduce((sum, item) => sum + (item.stock_available || 0), 0);
+
           return {
               ...p,
-              // true_stock: Số lượng chuẩn lấy từ View
-              true_stock: stockRecord ? stockRecord.stock_count : 0
+              true_stock: totalStock || 0
           };
       });
     }
@@ -93,12 +96,16 @@ export default function AdminProducts() {
     if(validVariants.length > 0) {
         const combos = generateCombinations(validVariants);
         const mergedSkus = combos.map(combo => {
+            // [LOGIC QUAN TRỌNG] Kiểm tra xem combo này đã tồn tại trong skuList chưa
+            // Nếu có rồi thì giữ nguyên (để giữ lại sku_name mà người dùng đã sửa)
             const existing = skuList.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
             if (existing) return existing;
+            
+            // Nếu chưa có thì tạo mới với tên mặc định
             return {
                 id: null,
                 options: combo,
-                sku_name: Object.values(combo).join(' - '),
+                sku_name: Object.values(combo).join(' - '), // Tên mặc định
                 stock: 0,
                 price_mod: 0,
                 image: '',
@@ -106,7 +113,11 @@ export default function AdminProducts() {
             };
         });
         
-        if (JSON.stringify(mergedSkus.map(s => s.options)) !== JSON.stringify(skuList.map(s => s.options))) {
+        // Chỉ update nếu danh sách thực sự thay đổi về mặt options
+        const currentOptionsJSON = JSON.stringify(skuList.map(s => s.options));
+        const newOptionsJSON = JSON.stringify(mergedSkus.map(s => s.options));
+        
+        if (currentOptionsJSON !== newOptionsJSON) {
              setSkuList(mergedSkus);
         }
     } else {
@@ -192,6 +203,22 @@ export default function AdminProducts() {
       e.preventDefault();
       setProcessing(true);
       try {
+          // [VALIDATION MỚI] Kiểm tra trùng lặp SKU Name
+          if (skuList.length > 0) {
+              const skuNames = skuList.map(s => s.sku_name.trim().toLowerCase());
+              const uniqueNames = new Set(skuNames);
+              if (skuNames.length !== uniqueNames.size) {
+                  throw new Error(t(
+                      "Mã SKU (Tên biến thể) không được trùng nhau! Vui lòng kiểm tra lại.", 
+                      "SKU Names must be unique! Please check."
+                  ));
+              }
+              // Kiểm tra tên rỗng
+              if (skuList.some(s => !s.sku_name || s.sku_name.trim() === '')) {
+                   throw new Error(t("Mã SKU không được để trống!", "SKU Name cannot be empty!"));
+              }
+          }
+
           // 1. Lưu Products
           const productData = {
               title: productForm.title, title_en: productForm.title_en,
@@ -218,9 +245,13 @@ export default function AdminProducts() {
 
           // 2. Lưu Variants
           if (productForm.variants && productForm.variants.length > 0 && skuList.length > 0) {
+               // Xóa các variant cũ không còn tồn tại trong list mới
                const { data: existingVariants } = await supabase.from('product_variants').select('id').eq('product_id', productId);
                const existingIds = existingVariants?.map(v => v.id) || [];
+               
+               // Lấy danh sách ID hiện tại trên UI (để giữ lại)
                const currentUiIds = skuList.map(s => s.id).filter(id => id !== null);
+               
                const idsToDelete = existingIds.filter(id => !currentUiIds.includes(id));
                if (idsToDelete.length > 0) await supabase.from('product_variants').delete().in('id', idsToDelete);
 
@@ -228,7 +259,7 @@ export default function AdminProducts() {
                    const record = {
                        product_id: productId,
                        options: sku.options,
-                       sku_name: Object.values(sku.options).join(' - '),
+                       sku_name: sku.sku_name.trim(), // Lưu tên SKU đã chỉnh sửa
                        price_mod: parseFloat(sku.price_mod) || 0,
                        stock: parseInt(sku.stock) || 0,
                        image: sku.image,
@@ -262,7 +293,7 @@ export default function AdminProducts() {
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
             let variantInfo = targetSku ? { ...targetSku.options } : {};
-            const fullTitle = targetSku ? `${currentProd.title} (${Object.values(targetSku.options).join(' - ')})` : currentProd.title;
+            const fullTitle = targetSku ? `${currentProd.title} (${targetSku.sku_name})` : currentProd.title;
             variantInfo._product_name = currentProd.title;
             variantInfo._full_title = fullTitle;
 
@@ -272,10 +303,8 @@ export default function AdminProducts() {
             toast.success(t(`Đã thêm ${insertData.length} Keys!`, `Added ${insertData.length} Keys!`));
 
             if (targetSku && targetSku.id) {
-                 const newStock = (parseInt(targetSku.stock) || 0) + insertData.length;
-                 await supabase.from('product_variants').update({stock: newStock}).eq('id', targetSku.id);
-                 const skuIndex = skuList.findIndex(s => s.id === targetSku.id);
-                 if (skuIndex >= 0) updateSkuField(skuIndex, 'stock', newStock);
+                 // Update stock logic for digital via view invalidation or dummy update
+                 queryClient.invalidateQueries({ queryKey: ['admin-products'] });
             }
         } else {
             const qtyToAdd = parseInt(stockInput);
@@ -323,7 +352,6 @@ export default function AdminProducts() {
            <tbody className="divide-y divide-slate-100">
              {products.map(p => {
                const hasVariants = p.variants && p.variants.length > 0;
-               // Đã sửa: Dùng true_stock thay cho physical_stock để hiển thị đúng cho Digital/Variant
                const displayStock = p.true_stock || 0;
 
                return (
@@ -339,7 +367,6 @@ export default function AdminProducts() {
                  </td>
                  <td className="p-4 text-xs font-medium text-slate-500">{p.is_digital ? 'Digital' : 'Physical'}</td>
                  <td className="p-4 text-center">
-                     {/* Đã sửa: Hiển thị tổng tồn kho (displayStock) cho cả trường hợp có biến thể */}
                      <span className={`px-2 py-1 rounded-md text-xs font-bold ${displayStock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                         {displayStock}
                      </span>
@@ -434,15 +461,15 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* SKU MATRIX */}
+                    {/* SKU MATRIX - [ĐÃ SỬA: CHO PHÉP CHỈNH SỬA SKU NAME] */}
                     {productForm.variants.length > 0 && skuList.length > 0 && (
                         <div className="mt-4 border-t pt-4">
-                            <label className="block text-sm font-bold text-slate-700 mb-2">{t('Chi tiết biến thể (Giá & Ảnh)', 'Variant Details')}</label>
+                            <label className="block text-sm font-bold text-slate-700 mb-2">{t('Chi tiết biến thể (API & Giá)', 'Variant Details')}</label>
                             <div className="overflow-x-auto rounded border border-slate-200 bg-white">
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-slate-100 text-xs uppercase text-slate-500 font-bold">
                                         <tr>
-                                            <th className="p-2">{t('Biến thể', 'Variant')}</th>
+                                            <th className="p-2 w-1/3">{t('Tên SKU (API Code)', 'SKU Name')}</th>
                                             <th className="p-2 w-20 text-center">{t('Ảnh', 'Img')}</th>
                                             <th className="p-2 w-28">{t('Giá (+/-)', 'Price')}</th>
                                             <th className="p-2 w-20 text-center">{t('Kho', 'Stock')}</th>
@@ -452,8 +479,19 @@ export default function AdminProducts() {
                                     <tbody className="divide-y divide-slate-100">
                                         {skuList.map((sku, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
-                                                <td className="p-2 font-medium text-slate-700">
-                                                    {Object.values(sku.options).join(' / ')}
+                                                {/* INPUT SKU NAME: Cho phép người dùng nhập mã API custom */}
+                                                <td className="p-2">
+                                                    <input 
+                                                        type="text" 
+                                                        className="w-full border rounded p-1.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500"
+                                                        value={sku.sku_name}
+                                                        onChange={(e) => updateSkuField(idx, 'sku_name', e.target.value)}
+                                                        placeholder="Mã SKU (API Code)"
+                                                    />
+                                                    {/* Hiển thị label các options nhỏ bên dưới để biết SKU này là của biến thể nào */}
+                                                    <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                                                        <Tag size={10}/> {Object.values(sku.options).join(' / ')}
+                                                    </div>
                                                 </td>
                                                 <td className="p-2 text-center">
                                                     <label className="inline-block w-8 h-8 border rounded bg-slate-50 cursor-pointer overflow-hidden relative group">
