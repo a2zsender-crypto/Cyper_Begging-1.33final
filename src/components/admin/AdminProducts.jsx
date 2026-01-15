@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { Package, Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Trash2, Save, AlertCircle, Globe, Tag } from 'lucide-react';
+import { Plus, Edit, X, Upload, Key, Layers, Settings, Image as ImageIcon, Save, Tag } from 'lucide-react';
 import { useLang } from '../../context/LangContext';
 import { toast } from 'react-toastify';
 import { useQuery, useQueryClient } from '@tanstack/react-query'; 
@@ -10,7 +10,6 @@ export default function AdminProducts() {
   const queryClient = useQueryClient(); 
   
   // --- FETCH PRODUCTS & STOCK ---
-  // Lấy thêm dữ liệu từ view 'product_stock' để hiển thị đúng số lượng
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
@@ -21,17 +20,15 @@ export default function AdminProducts() {
         .order('id', {ascending: false});
       if (prodError) throw prodError;
 
-      // 2. Lấy dữ liệu tồn kho từ View (Chứa logic đếm Key và cộng tổng Variant)
+      // 2. Lấy dữ liệu tồn kho từ View
       const { data: stockData, error: stockError } = await supabase
         .from('view_product_variant_stock')
         .select('*');
       
-      // Nếu lỗi view stock thì log ra nhưng vẫn trả về products để ko chết app
       if (stockError) console.error("Stock View Error:", stockError);
 
       // 3. Merge stock vào product
       return productsData.map(p => {
-          // Tính tổng stock của product này từ view
           const totalStock = stockData
             ?.filter(s => s.product_id === p.id)
             .reduce((sum, item) => sum + (item.stock_available || 0), 0);
@@ -43,6 +40,21 @@ export default function AdminProducts() {
       });
     }
   });
+
+  // --- [NEW] FETCH ALL EXISTING SKU NAMES (Để check trùng) ---
+  const [existingSkuNames, setExistingSkuNames] = useState(new Set());
+  
+  useEffect(() => {
+      const fetchAllSkus = async () => {
+          // Chỉ lấy cột sku_name của tất cả các biến thể
+          const { data } = await supabase.from('product_variants').select('sku_name');
+          if (data) {
+              const names = new Set(data.map(item => item.sku_name?.trim().toLowerCase()));
+              setExistingSkuNames(names);
+          }
+      };
+      fetchAllSkus();
+  }, [products]); // Refresh khi danh sách sản phẩm thay đổi
 
   // --- MODAL STATES ---
   const [showProductModal, setShowProductModal] = useState(false);
@@ -66,7 +78,7 @@ export default function AdminProducts() {
   const [processing, setProcessing] = useState(false);
   const [skuUploading, setSkuUploading] = useState(null);
 
-  // --- LOGIC GENERATOR (Sinh tổ hợp biến thể) ---
+  // --- LOGIC GENERATOR (Sinh tổ hợp biến thể + Tự động xử lý trùng tên) ---
   useEffect(() => {
     if (!productForm.variants || productForm.variants.length === 0) {
         if (!productForm.id && skuList.length > 0) setSkuList([]); 
@@ -95,17 +107,43 @@ export default function AdminProducts() {
     
     if(validVariants.length > 0) {
         const combos = generateCombinations(validVariants);
+        
+        // Dùng Set để theo dõi các tên SKU tạm thời đang được tạo ra trong phiên này
+        // Để tránh trường hợp 2 dòng mới trong cùng 1 form bị trùng nhau
+        const currentSessionNames = new Set(); 
+        skuList.forEach(s => currentSessionNames.add(s.sku_name.toLowerCase()));
+
         const mergedSkus = combos.map(combo => {
-            // [LOGIC QUAN TRỌNG] Kiểm tra xem combo này đã tồn tại trong skuList chưa
-            // Nếu có rồi thì giữ nguyên (để giữ lại sku_name mà người dùng đã sửa)
+            // 1. Kiểm tra xem SKU này đã tồn tại trong state chưa (Giữ nguyên nếu đang edit)
             const existing = skuList.find(s => JSON.stringify(s.options) === JSON.stringify(combo));
-            if (existing) return existing;
+            if (existing) {
+                currentSessionNames.add(existing.sku_name.toLowerCase());
+                return existing;
+            }
             
-            // Nếu chưa có thì tạo mới với tên mặc định
+            // 2. Nếu là SKU mới, sinh tên và xử lý trùng lặp
+            let baseName = Object.values(combo).join(' - ');
+            let uniqueName = baseName;
+            let counter = 1;
+
+            // Kiểm tra trùng: Trùng trong DB (existingSkuNames) HOẶC Trùng trong phiên hiện tại (currentSessionNames)
+            // Lưu ý: Nếu đang edit sản phẩm cũ, ta cần loại trừ tên SKU của chính nó ra khỏi check DB (đã xử lý ở bước 1)
+            while (
+                existingSkuNames.has(uniqueName.toLowerCase()) || 
+                currentSessionNames.has(uniqueName.toLowerCase())
+            ) {
+                // Logic thêm số: vn -> vn1, vn1 -> vn2
+                uniqueName = `${baseName}${counter}`; 
+                counter++;
+            }
+
+            // Đánh dấu tên này đã dùng
+            currentSessionNames.add(uniqueName.toLowerCase());
+
             return {
                 id: null,
                 options: combo,
-                sku_name: Object.values(combo).join(' - '), // Tên mặc định
+                sku_name: uniqueName, // Tên đã được xử lý duy nhất
                 stock: 0,
                 price_mod: 0,
                 image: '',
@@ -113,7 +151,7 @@ export default function AdminProducts() {
             };
         });
         
-        // Chỉ update nếu danh sách thực sự thay đổi về mặt options
+        // Cập nhật state nếu có thay đổi
         const currentOptionsJSON = JSON.stringify(skuList.map(s => s.options));
         const newOptionsJSON = JSON.stringify(mergedSkus.map(s => s.options));
         
@@ -123,7 +161,7 @@ export default function AdminProducts() {
     } else {
         setSkuList([]);
     }
-  }, [productForm.variants]);
+  }, [productForm.variants]); // Dependency: Chạy lại khi cấu hình variants thay đổi
 
   // --- FETCH SKUs KHI EDIT ---
   const fetchSkus = async (productId) => {
@@ -203,7 +241,7 @@ export default function AdminProducts() {
       e.preventDefault();
       setProcessing(true);
       try {
-          // [VALIDATION MỚI] Kiểm tra trùng lặp SKU Name
+          // Check trùng lặp ngay trong form hiện tại trước khi gửi
           if (skuList.length > 0) {
               const skuNames = skuList.map(s => s.sku_name.trim().toLowerCase());
               const uniqueNames = new Set(skuNames);
@@ -213,7 +251,6 @@ export default function AdminProducts() {
                       "SKU Names must be unique! Please check."
                   ));
               }
-              // Kiểm tra tên rỗng
               if (skuList.some(s => !s.sku_name || s.sku_name.trim() === '')) {
                    throw new Error(t("Mã SKU không được để trống!", "SKU Name cannot be empty!"));
               }
@@ -245,13 +282,10 @@ export default function AdminProducts() {
 
           // 2. Lưu Variants
           if (productForm.variants && productForm.variants.length > 0 && skuList.length > 0) {
-               // Xóa các variant cũ không còn tồn tại trong list mới
+               // Cleanup old variants
                const { data: existingVariants } = await supabase.from('product_variants').select('id').eq('product_id', productId);
                const existingIds = existingVariants?.map(v => v.id) || [];
-               
-               // Lấy danh sách ID hiện tại trên UI (để giữ lại)
                const currentUiIds = skuList.map(s => s.id).filter(id => id !== null);
-               
                const idsToDelete = existingIds.filter(id => !currentUiIds.includes(id));
                if (idsToDelete.length > 0) await supabase.from('product_variants').delete().in('id', idsToDelete);
 
@@ -274,6 +308,7 @@ export default function AdminProducts() {
           }
 
           setShowProductModal(false);
+          // Invalidate cả query products để update list SKU đã dùng
           queryClient.invalidateQueries({ queryKey: ['admin-products'] });
           toast.success(t("Lưu thành công!", "Saved successfully!"));
       } catch (err) { 
@@ -303,7 +338,6 @@ export default function AdminProducts() {
             toast.success(t(`Đã thêm ${insertData.length} Keys!`, `Added ${insertData.length} Keys!`));
 
             if (targetSku && targetSku.id) {
-                 // Update stock logic for digital via view invalidation or dummy update
                  queryClient.invalidateQueries({ queryKey: ['admin-products'] });
             }
         } else {
@@ -461,7 +495,7 @@ export default function AdminProducts() {
                         ))}
                     </div>
 
-                    {/* SKU MATRIX - [ĐÃ SỬA: CHO PHÉP CHỈNH SỬA SKU NAME] */}
+                    {/* SKU MATRIX */}
                     {productForm.variants.length > 0 && skuList.length > 0 && (
                         <div className="mt-4 border-t pt-4">
                             <label className="block text-sm font-bold text-slate-700 mb-2">{t('Chi tiết biến thể (API & Giá)', 'Variant Details')}</label>
@@ -479,7 +513,6 @@ export default function AdminProducts() {
                                     <tbody className="divide-y divide-slate-100">
                                         {skuList.map((sku, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
-                                                {/* INPUT SKU NAME: Cho phép người dùng nhập mã API custom */}
                                                 <td className="p-2">
                                                     <input 
                                                         type="text" 
@@ -488,7 +521,6 @@ export default function AdminProducts() {
                                                         onChange={(e) => updateSkuField(idx, 'sku_name', e.target.value)}
                                                         placeholder="Mã SKU (API Code)"
                                                     />
-                                                    {/* Hiển thị label các options nhỏ bên dưới để biết SKU này là của biến thể nào */}
                                                     <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
                                                         <Tag size={10}/> {Object.values(sku.options).join(' / ')}
                                                     </div>
