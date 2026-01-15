@@ -317,7 +317,7 @@ export default function AdminProducts() {
       }
   };
 
-  // --- IMPORT STOCK ---
+// --- IMPORT STOCK ---
   const handleImportStock = async () => {
     try {
         if (!showKeyModal?.product) return;
@@ -328,14 +328,24 @@ export default function AdminProducts() {
             if (!keyInput.trim()) return;
             const codes = keyInput.split('\n').filter(c => c.trim() !== '');
             
-            // Gắn SKU name để key map chính xác
-            let variantInfo = targetSku ? { ...targetSku.options, _sku_name: targetSku.sku_name } : {};
+            // [FIX MỚI] Lấy sku_name chính xác để lưu vào bảng product_keys
+            let variantInfo = {};
+            let skuNameForDb = null;
+
+            if (targetSku) {
+                variantInfo = { ...targetSku.options };
+                // Lưu ý: targetSku.sku_name là cái tên duy nhất bạn muốn dùng
+                skuNameForDb = targetSku.sku_name; 
+                // Vẫn lưu _sku_name vào json để dự phòng
+                variantInfo._sku_name = targetSku.sku_name;
+            }
             variantInfo._product_name = currentProd.title;
 
             const insertData = codes.map(code => ({ 
                 product_id: currentProd.id, 
                 key_value: code.trim(), 
-                variant_info: variantInfo, 
+                variant_info: variantInfo,
+                sku_name: skuNameForDb, // <--- CỘT MỚI: QUAN TRỌNG NHẤT
                 is_used: false 
             }));
             
@@ -345,6 +355,7 @@ export default function AdminProducts() {
             queryClient.invalidateQueries({ queryKey: ['admin-products'] });
 
         } else {
+            // ... (Giữ nguyên logic nhập kho vật lý cũ) ...
             const qtyToAdd = parseInt(stockInput);
             if (isNaN(qtyToAdd) || qtyToAdd <= 0) return toast.warn(t("Số lượng > 0", "Qty > 0"));
             
