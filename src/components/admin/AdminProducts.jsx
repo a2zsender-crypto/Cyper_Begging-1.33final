@@ -9,11 +9,11 @@ export default function AdminProducts() {
   const { t, lang } = useLang(); 
   const queryClient = useQueryClient(); 
   
-  // --- FETCH PRODUCTS & STOCK & VARIANTS ---
+// --- FETCH PRODUCTS & STOCK & VARIANTS ---
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['admin-products'],
     queryFn: async () => {
-      // [FIX QUAN TRỌNG] Không dùng alias "variants:" để tránh ghi đè cột variants gốc
+      // 1. Lấy products kèm variants (variants này là raw data, stock có thể = 0 với digital)
       const { data: productsData, error: prodError } = await supabase
         .from('products')
         .select(`
@@ -24,30 +24,44 @@ export default function AdminProducts() {
         
       if (prodError) throw prodError;
 
-      // 2. Lấy dữ liệu tồn kho từ View
+      // 2. Lấy dữ liệu tồn kho từ View (View này đã count keys cho digital chính xác)
       const { data: stockData, error: stockError } = await supabase
         .from('view_product_variant_stock')
         .select('*');
       
       if (stockError) console.error("Stock View Error:", stockError);
 
-      // 3. Xử lý dữ liệu
+      // 3. Xử lý dữ liệu & MERGE STOCK TỪ VIEW VÀO VARIANTS
       return productsData.map(p => {
+          // Tính tổng stock hiển thị ra ngoài list
           const totalStock = stockData
             ?.filter(s => s.product_id === p.id)
             .reduce((sum, item) => sum + (item.stock_available || 0), 0);
 
+          // [FIX QUAN TRỌNG]: Update stock cho từng variant trong p.product_variants
+          // Logic: Duyệt qua từng variant raw, tìm variant tương ứng trong stockData (View) để lấy stock thật
+          let updatedVariants = [];
+          if (p.product_variants && p.product_variants.length > 0) {
+              updatedVariants = p.product_variants.map(rawVariant => {
+                  const viewItem = stockData?.find(s => s.variant_id === rawVariant.id);
+                  return {
+                      ...rawVariant,
+                      stock: viewItem ? viewItem.stock_available : (rawVariant.stock || 0)
+                  };
+              });
+          }
+
           // Chọn ảnh hiển thị: Ảnh chính -> Ảnh biến thể đầu tiên -> Placeholder
           let thumb = (p.images && p.images.length > 0) ? p.images[0] : null;
-          // [FIX] Lấy từ p.product_variants thay vì p.variants
-          if (!thumb && p.product_variants && p.product_variants.length > 0) {
-              const vWithImg = p.product_variants.find(v => v.image);
+          if (!thumb && updatedVariants.length > 0) {
+              const vWithImg = updatedVariants.find(v => v.image);
               if (vWithImg) thumb = vWithImg.image;
           }
           if (!thumb) thumb = 'https://via.placeholder.com/50?text=NoImg';
 
           return {
               ...p,
+              product_variants: updatedVariants, // Ghi đè bằng danh sách đã update stock
               true_stock: totalStock || 0,
               display_image: thumb 
           };
