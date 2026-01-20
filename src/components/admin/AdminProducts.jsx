@@ -30,15 +30,14 @@ export default function AdminProducts() {
 
       // 3. Merge Stock
       return productsData.map(p => {
-          // Tính toán tồn kho thực tế khả dụng (Digital = keys - pending, Physical = stock - pending)
           const variantStocks = stockData?.filter(s => s.product_id === p.id) || [];
           
+          // Tính tổng tồn kho khả dụng của toàn bộ sản phẩm
           const totalStock = variantStocks.reduce((sum, item) => {
-              // Tồn kho khả dụng = (Tồn kho gốc) - (Hàng đang chờ thanh toán)
-              const available = p.is_digital 
-                ? (item.digital_stock || 0) 
-                : (item.total_stock || 0);
-              return sum + Math.max(0, available - (item.pending_stock || 0));
+              // Tồn kho gốc (Digital lấy digital_stock, Physical lấy total_stock)
+              const base = p.is_digital ? (item.digital_stock || 0) : (item.total_stock || 0);
+              // Khả dụng = Gốc - Đang giữ (pending)
+              return sum + Math.max(0, base - (item.pending_stock || 0));
           }, 0);
 
           let updatedVariants = [];
@@ -52,10 +51,7 @@ export default function AdminProducts() {
                   } else {
                       vStock = rawVariant.stock || 0;
                   }
-                  return {
-                      ...rawVariant,
-                      stock: vStock
-                  };
+                  return { ...rawVariant, stock: vStock };
               });
           }
 
@@ -69,7 +65,7 @@ export default function AdminProducts() {
           return {
               ...p,
               product_variants: updatedVariants,
-              true_stock: totalStock,
+              true_stock: totalStock, // Đây là giá trị hiển thị ở cột Tồn kho
               display_image: thumb 
           };
       });
