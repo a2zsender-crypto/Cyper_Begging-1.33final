@@ -1,3 +1,4 @@
+
 import { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
@@ -36,19 +37,18 @@ export default function Products() {
   const { data: stocks = {} } = useQuery({
     queryKey: ['public-stock-variant'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('view_product_variant_stock').select('*');
+      const { data: stockRows, error } = await supabase.from('view_product_variant_stock').select('*');
       if (error) throw error;
       
       const { data: productsInfo } = await supabase.from('products').select('id, is_digital');
       
-      // Map tồn kho theo ProductID
       const map = {};
-      data?.forEach(row => {
+      stockRows?.forEach(row => {
           const pid = row.product_id;
           const pInfo = productsInfo?.find(item => item.id === pid);
           if (!map[pid]) map[pid] = 0;
 
-          // Tính toán: (Digital/Physical Stock) - Pending Stock
+          // Tính toán: (Digital hoặc Physical Stock) trừ đi Pending Stock
           const baseStock = pInfo?.is_digital ? (row.digital_stock || 0) : (row.total_stock || 0);
           const available = Math.max(0, baseStock - (row.pending_stock || 0));
           
