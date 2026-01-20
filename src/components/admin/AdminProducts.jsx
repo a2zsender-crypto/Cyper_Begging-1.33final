@@ -30,17 +30,31 @@ export default function AdminProducts() {
 
       // 3. Merge Stock
       return productsData.map(p => {
-          const totalStock = stockData
-            ?.filter(s => s.product_id === p.id)
-            .reduce((sum, item) => sum + (item.digital_stock || item.total_stock || 0), 0);
+          // Tính toán tồn kho thực tế khả dụng (Digital = keys - pending, Physical = stock - pending)
+          const variantStocks = stockData?.filter(s => s.product_id === p.id) || [];
+          
+          const totalStock = variantStocks.reduce((sum, item) => {
+              // Tồn kho khả dụng = (Tồn kho gốc) - (Hàng đang chờ thanh toán)
+              const available = p.is_digital 
+                ? (item.digital_stock || 0) 
+                : (item.total_stock || 0);
+              return sum + Math.max(0, available - (item.pending_stock || 0));
+          }, 0);
 
           let updatedVariants = [];
           if (p.product_variants && p.product_variants.length > 0) {
               updatedVariants = p.product_variants.map(rawVariant => {
                   const viewItem = stockData?.find(s => s.variant_id === rawVariant.id);
+                  let vStock = 0;
+                  if (viewItem) {
+                      const base = p.is_digital ? (viewItem.digital_stock || 0) : (viewItem.total_stock || 0);
+                      vStock = Math.max(0, base - (viewItem.pending_stock || 0));
+                  } else {
+                      vStock = rawVariant.stock || 0;
+                  }
                   return {
                       ...rawVariant,
-                      stock: viewItem ? (p.is_digital ? viewItem.digital_stock : viewItem.total_stock) : (rawVariant.stock || 0)
+                      stock: vStock
                   };
               });
           }
@@ -55,7 +69,7 @@ export default function AdminProducts() {
           return {
               ...p,
               product_variants: updatedVariants,
-              true_stock: totalStock || 0,
+              true_stock: totalStock,
               display_image: thumb 
           };
       });
