@@ -39,12 +39,20 @@ export default function Products() {
       const { data, error } = await supabase.from('view_product_variant_stock').select('*');
       if (error) throw error;
       
+      const { data: productsInfo } = await supabase.from('products').select('id, is_digital');
+      
       // Map tồn kho theo ProductID
       const map = {};
       data?.forEach(row => {
           const pid = row.product_id;
+          const pInfo = productsInfo?.find(item => item.id === pid);
           if (!map[pid]) map[pid] = 0;
-          map[pid] += (row.stock_available || 0);
+
+          // Tính toán: (Digital/Physical Stock) - Pending Stock
+          const baseStock = pInfo?.is_digital ? (row.digital_stock || 0) : (row.total_stock || 0);
+          const available = Math.max(0, baseStock - (row.pending_stock || 0));
+          
+          map[pid] += available;
       });
       return map;
     }
