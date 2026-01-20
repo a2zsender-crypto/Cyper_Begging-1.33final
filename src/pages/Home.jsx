@@ -33,19 +33,19 @@ export default function Home() {
   const { data: stocks = {} } = useQuery({
     queryKey: ['home-stocks'],
     queryFn: async () => {
-      const { data } = await supabase.from('view_product_variant_stock').select('*');
+      const { data: stockRows } = await supabase.from('view_product_variant_stock').select('*');
       const { data: productsInfo } = await supabase.from('products').select('id, is_digital');
       
       const map = {};
-      data?.forEach(s => {
-          const pid = s.product_id;
+      stockRows?.forEach(row => {
+          const pid = row.product_id;
           const pInfo = productsInfo?.find(item => item.id === pid);
           if (!map[pid]) map[pid] = 0;
           
-          // Lấy tồn kho gốc dựa trên loại sản phẩm
-          const baseStock = pInfo?.is_digital ? (s.digital_stock || 0) : (s.total_stock || 0);
-          // Trừ đi số lượng đang pending
-          const available = Math.max(0, baseStock - (s.pending_stock || 0));
+          // Xác định tồn kho gốc theo loại sản phẩm
+          const baseStock = pInfo?.is_digital ? (row.digital_stock || 0) : (row.total_stock || 0);
+          // Tồn kho khả dụng = Gốc - Đang giữ
+          const available = Math.max(0, baseStock - (row.pending_stock || 0));
           
           map[pid] += available;
       });
@@ -222,4 +222,5 @@ export default function Home() {
     </div>
   );
 }
+
 
